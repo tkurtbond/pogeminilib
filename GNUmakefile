@@ -44,7 +44,7 @@ LIBDIR := $(BUILD)/lib
 LIBRARY := pogeminilib
 # The library's modules, in import order (PLAN.md, "Library and module
 # names"). None yet: each phase adds its own.
-LIBMODS :=
+LIBMODS := GeminiPunycode GeminiUrls
 # The installed libraries it needs (PLAN.md, "Foundations").
 DEPLIBS := podatetime posockets polibtls pounix
 
@@ -67,7 +67,7 @@ LIBPATH := -library-path $(LIBDIR) -library-path $(POCLIBDIR)
 LIBSRC := $(LIBMODS:%=src/%.Mod)
 LIBSTAMP := $(if $(LIBMODS),$(LIBDIR)/$(LIBRARY)-OC.stamp)
 # Test programs (test/<name>.Mod, each a main module), run from test/.
-TESTS := TestCheck
+TESTS := TestCheck TestPunycode TestUrls
 # Programs that must halt (test/<name>.Mod), as name:Assert-code. poc's
 # ASSERT(x, n) prints "assertion failed (n)" on standard error and exits
 # with status 10, so `make test` requires both. Codes 120..129 are this

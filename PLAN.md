@@ -287,10 +287,14 @@ The split follows what a program needs: a gemtext renderer imports
 
 ### URLs (`GeminiUrls`)
 
-- A `URL` record of scheme, host (lower case, decoded, IPv6 without
-  brackets), port (`-1` for none; `Port(u)` gives 1965 for gemini),
-  path, query and fragment, each kept as sent (still encoded) and the
-  path also decoded, as `GemRequest` does.
+- A `URL` record of scheme, userinfo, host (lower case, decoded, IPv6
+  without brackets, no final `.`), port (`NoPort`, -1, for none;
+  `Port(u)` gives 1965 for gemini), path, query and fragment, each kept
+  as sent (still encoded), with flags for a `//`, a `?` and a `#` that
+  have nothing after them. The server's `Request` has the path decoded
+  and normalised, as `GemRequest`'s.
+- A host's final `.` is dropped by both: SNI must not have one (RFC
+  6066), and the known-hosts file then keeps one entry per host.
 - `Parse` for any absolute URL, lenient as a client must be (any
   scheme; `http:` links in a page are links too); `CheckRequest` the
   server's strict rules (`GemRequest`'s: 59 and 53 with a reason).
@@ -300,9 +304,13 @@ The split follows what a program needs: a gemtext renderer imports
   refuses `..` above `/` (pogemini, Phase 2). Both are kept, named
   apart.
 - `Write(u)` back to text, `WithQuery(u, text)` for an input answer
-  (the text percent-encoded, as the specification asks: spaces as
-  `%20`), and the request line for a URL (fragment dropped; refused
-  over 1024 bytes).
+  (the text percent-encoded, all but RFC 3986's unreserved, as the
+  specification asks: spaces as `%20`; the fragment dropped, since it
+  named a place in the prompt's page), and `RequestLine(u)` (fragment
+  dropped, an empty path sent as `/`; refused with userinfo, with no
+  host, or over 1024 bytes).
+- Every URL, parsed or resolved, is at most 1024 bytes: a longer one
+  could never be fetched, and the record's fields are fixed arrays.
 - IRIs: non-ASCII as UTF-8 accepted, as pogemini does; percent-encoded
   when sent. A host is kept as written; its ASCII form, from
   `GeminiPunycode`, is what goes to name resolution, SNI and the
@@ -585,6 +593,9 @@ for one), assigned as modules need them:
 | Code | Module | Meaning |
 |---|---|---|
 
+None yet: `GeminiPunycode` and `GeminiUrls` take only outside data,
+so nothing in them halts.
+
 ### Testing
 
 As its siblings: one main module per concern in `test/`, run from
@@ -673,7 +684,7 @@ Found:
   can't (AGENTS.md, "Test"): to be tried with the first task test, in
   Phase 4, and the note corrected if memcheck works.
 
-### Phase 1: URLs
+### Phase 1: URLs [done]
 
 `GeminiUrls` ("URLs"), with `TestUrls`: parsing, the server's check
 (pogemini's `TestParse` cases, carried over), resolution (RFC 3986
@@ -682,6 +693,37 @@ section 5.4), encoding, the request line. `GeminiPunycode`
 section 7.1 sample strings both ways, ASCII lowered, each refusal,
 a host that is half ASCII and half not, an IP address untouched, and
 encoding then decoding giving the host back. No network.
+
+Done 2026-11-18. `make test` (118 checks in `TestPunycode`, 191 in
+`TestUrls`) and `make valgrind` pass, and `gmake test` on OpenBSD 7.9
+i386 (erekose) and NetBSD 11.0 amd64 (terhali): the library's first
+build on the BSDs. `doc/GeminiPunycode.md` and `doc/GeminiUrls.md`
+written by `make doc`. Found:
+
+- poc passes the bytes of a string literal through unchanged, so UTF-8
+  literals in a test are UTF-8 at run time (checked with a throwaway
+  program).
+- RFC 3492's samples were taken from the RFC's text by a script, and
+  each encoding also checked against Python's punycode codec; they
+  agree but for (I), whose one upper-case letter is the RFC's
+  "mixed-case annotation". In decoding, the RFC's check that a decoded
+  code point isn't basic can never fail (n starts at 128 and only
+  grows), so it was left out.
+- RFC 3986 section 5.4's 42 examples were likewise taken from the
+  RFC's text; all pass, `http:g` as a strict parser gives it. By
+  section 5.2.2 an empty reference keeps the base's path as it is,
+  dots and all; only a merged or given path has its dots removed.
+- `CheckRequest` is pogemini's `GemRequest.Parse` with one fix:
+  pogemini copies an IPv6 literal into the 256-byte host without
+  checking its length, and `gemini://[` with 300 hex digits `]/` halts
+  it with "index out of range" (checked with a throwaway program
+  against pogemini's source): a request from any client stops the
+  server. Here it is "a malformed IPv6 address". pogemini's own fix is
+  for its repository (or Phase 8, when `CheckRequest` replaces it).
+- A link in a page may hold what RFC 3986 doesn't allow (`|`, `{`,
+  `\`, a non-ASCII character): `Parse` keeps it, and `RequestLine`
+  percent-encodes it, so only a space or a control character, which
+  can't be in a link at all, is refused.
 
 ### Phase 2: gemtext
 

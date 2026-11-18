@@ -28,9 +28,9 @@ libtls and Gemini clients that applies here unchanged:
 
 ## Status
 
-As of 2026-11-18, Phase 0 (the skeleton) is done: the GNUmakefile,
-`test/Check.Mod` and `TestCheck`, and no module yet; Phase 1 (URLs and
-`GeminiPunycode`) is next. One question in PLAN.md is open (an
+As of 2026-11-18, Phases 0 (the skeleton) and 1 (`GeminiPunycode` and
+`GeminiUrls`, with `TestPunycode` and `TestUrls`) are done; Phase 2
+(gemtext) is next. One question in PLAN.md is open (an
 identity's hash from its file, needed in Phase 5); the rest are
 decided (struck through there, each recorded where it applies). Two
 changes in other repositories come first: a `poll` with a deadline in
@@ -123,7 +123,7 @@ tools already there (checked 2026-11-18):
 
 `ssh <host>` is the user's account, `ssh root@<host>` root's. Neither
 has gemget, valgrind or pogemini, so tests needing them skip there.
-Phase 0's `gmake test` passed on both (2026-11-18).
+Phase 1's `gmake test` passed on both (2026-11-18).
 Copy the working tree (`tar` less `build/` and `.git`) into a directory
 under `~/tmp` there, with the dependencies from `git archive`s, each
 installed in turn by `gmake install POCLIBDIR=<dir>` there and used by

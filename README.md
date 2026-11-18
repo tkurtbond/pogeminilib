@@ -10,9 +10,10 @@ cooperative `Tasks` and a blocking one without them, trust on first
 use, client certificates, and gemtext parsed and written; later, the
 server engine of pogemini, a Gemini server, moved here.
 
-**Status: begun.** Phase 0 of [PLAN.md](PLAN.md), the skeleton, is
-done: the build and the test harness, and no module yet; Phase 1,
-URLs, is next. PLAN.md
+**Status: begun.** Phases 0 and 1 of [PLAN.md](PLAN.md) are done:
+`GeminiUrls` (URLs parsed, resolved, written, and checked as a server
+must) and `GeminiPunycode` (internationalised host names); Phase 2,
+gemtext, is next. Their reference is in [doc/](doc/). PLAN.md
 has the design and the roadmap; [AGENTS.md](AGENTS.md) has the working
 notes.
 
