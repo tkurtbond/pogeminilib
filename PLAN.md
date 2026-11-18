@@ -718,8 +718,8 @@ written by `make doc`. Found:
   checking its length, and `gemini://[` with 300 hex digits `]/` halts
   it with "index out of range" (checked with a throwaway program
   against pogemini's source): a request from any client stops the
-  server. Here it is "a malformed IPv6 address". pogemini's own fix is
-  for its repository (or Phase 8, when `CheckRequest` replaces it).
+  server. Here it is "a malformed IPv6 address". Fixed in pogemini the
+  same way, with its tests (its PLAN.md, "A long IPv6 literal").
 - A link in a page may hold what RFC 3986 doesn't allow (`|`, `{`,
   `\`, a non-ASCII character): `Parse` keeps it, and `RequestLine`
   percent-encodes it, so only a space or a control character, which
