@@ -125,40 +125,119 @@ change until the library is settled.
 
 ## Gemini's requirements
 
-From the protocol specification (0.24.1, the one pogemini follows;
-`gemini://geminiprotocol.net/docs/protocol-specification.gmi`) and the
-gemtext specification
-(`gemini://geminiprotocol.net/docs/gemtext-specification.gmi`), to be
-re-read in Phase 0 and each rule recorded here with its section, as
-pogemini's PLAN.md records the server's. What a client must do, as
-known before that re-reading:
+Re-read 2026-11-18 (Phase 0) in the protocol specification, 0.24.1,
+the one pogemini follows
+(`gemini://geminiprotocol.net/docs/protocol-specification.gmi`), and
+the gemtext specification, 0.24.1
+(`gemini://geminiprotocol.net/docs/gemtext-specification.gmi`), each
+rule with its section ("P" the protocol's, "G" gemtext's), as
+pogemini's PLAN.md records the server's.
 
-- **The request** is an absolute URI of at most 1024 bytes, then CR LF;
-  no userinfo, no fragment (a client strips the fragment before
-  sending). The port is 1965 if none is given.
-- **TLS** 1.2 or later, with SNI (the URL's host; none for an IP
-  address, as pogemini's test `GemClient` does). Servers'
-  certificates are mostly self-signed, so TOFU is the usual trust.
-- **The response header** is two digits, a space and the meta, CR LF;
-  the meta at most 1024 bytes, UTF-8, without a byte order mark. A
-  client treats an unknown status by its first digit. Only 2x has a
-  body, ended by the server's close_notify: an end without one must not
-  be taken for a whole response.
-- **Statuses**: 1x input (11 sensitive), 2x success with a MIME type (no
-  parameters means `text/gemini; charset=utf-8`), 3x redirect (30
-  temporary, 31 permanent; the meta a URL, possibly relative; a client
-  should limit them, 5 is the usual number, and warn of one to another
-  host or scheme), 4x temporary failure (41 to 44), 5x permanent (51 to
-  53, 59), 6x client certificates (60 required, 61 not authorised, 62
-  not valid).
-- **Gemtext**: lines end with LF or CR LF; a line is a link (`=>`,
-  optional whitespace, a URL, then whitespace and an optional label), a
-  preformatting toggle (```` ``` ````, the rest of the line alt text on
-  the opening one), a heading (`#`, `##`, `###`), a list item (`* `), a
-  quote (`>`), or text; between toggles every line is preformatted,
-  whatever it begins with. The exact whitespace rules, what `####` is,
-  and an unclosed preformatted block at the end are for Phase 0's
-  re-reading.
+### The protocol
+
+- **URLs** (P "Overview"): scheme `gemini`; no userinfo; an empty path
+  and `/` are the same; port 1965 by default; an IP address as host
+  SHOULD NOT be used (but works).
+- **The request** (P "Requests"): `absolute-URI CRLF`, the URI at most
+  1024 bytes; no fragment (MUST NOT); an empty path SHOULD be sent as
+  `/`. **`absolute-URI` is RFC 3986's, so ASCII**: an IRI's non-ASCII
+  is percent-encoded in the path and query, and a host's is sent as
+  punycode (`GeminiPunycode`; RFC 3987 section 3.1 allows either for a
+  host, and punycode is what SNI and DNS need), so a request is the
+  same whether its link was written as an IRI or a URI.
+- **The header** (P "Responses"): UTF-8, no byte order mark, two
+  digits and CR LF; a space and the meta after it, which 1x and 2x
+  must have (`prompt = 1*(SP / VCHAR)`, `mimetype`) and 4x, 5x and 6x
+  may leave out (`"50" CRLF` is whole; P's last example). No C0 or C1
+  control characters in the meta (VCHAR). Its length isn't limited
+  by the specification; pogemini's 1024 for the meta is ours
+  ("Responses").
+- **Statuses** (P "Status codes"): a status below 10 or over 69 MUST
+  be refused and the user warned; an unknown one within 10..69 SHOULD
+  be taken as its first digit's `x0`. 10 input, 11 sensitive input;
+  20 success; 30 temporary and 31 permanent redirects; 40..44
+  temporary failures (41 unavailable, 42 CGI, 43 proxy, 44 slow down,
+  with exponential back-off); 50..53 and 59 permanent (51 not found,
+  52 gone, 53 proxy refused, 59 bad request); 60 certificate required,
+  61 not authorised, 62 not valid.
+- **Input** (P "Input expected"): the answer becomes the query of the
+  same URL, replacing any query it had; spaces as `%20`; line breaks,
+  if allowed, as `%0A`.
+- **Success** (P "Success"): MIME parameters not understood are
+  ignored; text MAY end lines with LF alone, consistently, never CR
+  alone, and a client MUST accept CR LF and LF; a `text/*` without
+  `charset` is UTF-8. A client MUST support `text/gemini` in UTF-8 and
+  `text/plain` in US-ASCII or UTF-8. **0.24.1 requires a MIME type**
+  after 20; earlier versions let an empty meta mean
+  `text/gemini; charset=utf-8`, and many servers still send `20 ` with
+  none, so the client accepts that, as earlier versions said (Phase 3
+  records it as a leniency).
+- **A body's byte order mark** (P "Responses"): a text body SHOULD NOT
+  begin with one, and a client parsing `text/gemini` SHOULD ignore one
+  if it does: `GeminiText` skips a BOM at the start of a document.
+- **The end** (P "Responses", "Closing connections"): the server MUST
+  end with close_notify; a client SHOULD handle and tell the user of
+  an end without it (`complete`); a client MAY close early for content
+  over its limits.
+- **Redirects** (P "Redirection"): the meta an absolute or relative
+  URI-reference, never empty; the old query not carried over; the new
+  location's fragment, or the old one's, the client's choice; **at
+  most 5 redirects followed** (MUST). Warning of another host or
+  scheme is clients' practice, not the specification's.
+- **Client certificates** (P "Status 60"): a certificate made for a 60
+  is scoped to that host and port and to the path and everything below
+  it; one MUST NOT be made and used without the user taking part, nor
+  sent to another host, port or a path above without the user's
+  direction. So `GeminiIdentities` makes one only when the program asks
+  (never inside a fetch), and its scope helper keeps P's rule.
+- **TLS** (P "The use of TLS"): 1.2 or later; SNI MUST be sent for a
+  host name and SHOULD NOT for an IP address; a client SHOULD warn
+  when it sends a client certificate over TLS 1.2 (in the clear), so a
+  response tells the program the TLS version.
+- **Trust** (P "TLS Server certificate validation"): TOFU is strongly
+  recommended: on first contact the certificate's fingerprint and
+  expiry are kept, by host and port; a different fingerprint before
+  the stored expiry is evidence of an attack. We pin the public key's
+  fingerprint rather than the certificate's ("Trust"), which keeps
+  this rule and lets a renewal with the same key through.
+- **Proxies** (P "Intermediaries"): a client MAY not support them; out
+  of scope.
+
+### Gemtext
+
+- **Media type** (G "Media type parameters"): `charset`, UTF-8 by
+  default, and `lang`, a list of BCP 47 tags, **quoted if it has a
+  comma** (`lang="en,fr"`), so MIME parameters are parsed with RFC
+  2045's quoted strings; other parameters are ignored.
+- **Lines** (G "Line oriented design"): a line's type is known from
+  its first three characters and the parser's state, normal or
+  preformatted, normal at the start (G "Parser state"); the state at
+  the end means nothing, so an unclosed preformatted block is no
+  error.
+- **Text** (G "Text lines"): any line without another type's prefix;
+  an empty line is a text line; lines are never joined.
+- **Links** (G "Link lines", "Formal grammar"): `=>`, optional spaces
+  or tabs, the URL, then optionally spaces or tabs and a label; the
+  grammar allows whitespace after the label, which the parser drops.
+  The URL may be relative; a client MUST NOT connect anywhere just to
+  show a link. `=>` with no URL fits the grammar (`URI-reference` may
+  be empty): a link with an empty URL, flagged, for the program to
+  show as text.
+- **Preformatting toggles** (G "Preformatting toggle lines"): three
+  backticks at the start of the line, no leading whitespace; the rest
+  of an opening toggle MAY be alt text; the rest of a closing one MUST
+  be ignored, so a closing toggle has no alt text.
+- **Headings** (G "Heading lines"): one to three `#`, optional
+  whitespace, the text; the grammar makes `####x` a level-3 heading of
+  text `#x`. The first heading may serve as the title.
+- **List items** (G "List items"): `*` and a space; `*x` is text.
+- **Quotes** (G "Quote lines"): `>` and the rest of the line, any
+  whitespace after `>` kept, since the grammar doesn't drop it.
+- **In preformatted mode** (G "In pre-formatted mode"): every line but
+  a toggle is preformatted text, shown unaltered.
+- Heading, list and quote lines MAY be treated as text (G "Line
+  oriented design"); `GeminiText` recognises them all, and a program
+  that doesn't want them treats them as text.
 
 ## Design
 
@@ -227,8 +306,9 @@ The split follows what a program needs: a gemtext renderer imports
 - IRIs: non-ASCII as UTF-8 accepted, as pogemini does; percent-encoded
   when sent. A host is kept as written; its ASCII form, from
   `GeminiPunycode`, is what goes to name resolution, SNI and the
-  known-hosts file (and to the request line, if the specification,
-  re-read in Phase 0, says so).
+  known-hosts file, and the request line (its `absolute-URI` is ASCII:
+  "Gemini's requirements", "The request"), so the line is the same
+  whether a link was written as an IRI or a URI.
 
 ### Internationalised host names (`GeminiPunycode`)
 
@@ -256,11 +336,17 @@ in "Open questions"), in a module of its own, pure Oberon.
 ### Responses (`GeminiStatus`, `GeminiHeaders`)
 
 - `ParseHeader(line, h, why)`: status, meta, and refusal of what the
-  specification forbids (no space, a third digit, meta over 1024
-  bytes, a byte order mark, no CR LF within 1029 bytes). A bad header
-  is an error the program sees, never a halt.
+  specification forbids (no space, a third digit, a status below 10 or
+  over 69, a 1x without a prompt, a control character in the meta,
+  meta over 1024 bytes, a byte order mark, no CR LF within 1029
+  bytes). An unknown status within 10..69 is kept, and `Class` gives
+  its first digit's. A bad header is an error the program sees, never
+  a halt.
 - `Mime(meta, type, params)`: type and subtype lower case, parameters
-  as name and value; the 2x default when the meta is empty.
+  as name and value, a quoted value (`lang="en,fr"`) unquoted;
+  `text/gemini; charset=utf-8` when a 2x's meta is empty, which 0.24.1
+  forbids but servers still send ("Gemini's requirements",
+  "Success").
 - `WriteHeader` for a server, with the checks `GemServer.Header` makes
   (status 10..69, meta at most 1024 bytes), so `GeminiServer` uses it.
 
@@ -287,8 +373,10 @@ in "Open questions"), in a module of its own, pure Oberon.
   connection behind a small interface with a blocking and a task
   implementation. Whether a program in tasks may call it (it would
   hold up every task while it waits) is documented, not prevented.
-  Phase 0 probes whether `GeminiClient` called from the main program
-  of a tasking program needs a task of its own.
+  `GeminiClient` needs no task of its own: poc's main program is a
+  task (users' guide, section 12), and a probe (Phase 0) fetched
+  from pogemini through `SocketTasks.Connect` and `TlsTasks` in a main
+  body that started no task.
 - **A request has options**: a deadline (default 10 s, for everything
   from connect to close_notify), a client certificate's key pair, the
   trust (a `GeminiTrust.Store`, a CA file, or none), and the most body
@@ -299,15 +387,19 @@ in "Open questions"), in a module of its own, pure Oberon.
   page as it arrives and a large file isn't held in memory; `ReadAll`
   for a program that wants it whole. `complete` says the body ended
   with close_notify; a body cut short is an error with what came
-  before kept.
+  before kept. It also gives the TLS version (`Tls.Connection.Version`,
+  "TLSv1.3"), so a program can warn when a client certificate went
+  over TLS 1.2, as the specification asks.
 - **The server certificate is checked before the request is sent**
   (GeminiFetch's rule), so a URL with its query never reaches a server
   the program doesn't trust.
 - **Redirects** are the program's by default (`Fetch` returns a 3x as
-  it came); `FetchFollowing(url, opts, max)` follows at most `max` (5
-  if 0), resolving each against the URL before it, refusing a loop, a
-  scheme other than gemini, and asking a `RedirectPolicy` procedure
-  about one to another host.
+  it came); `FetchFollowing(url, opts, max)` follows at most `max`
+  (0 or over 5 gives 5, the specification's limit), resolving each
+  against the URL before it (so the old query is never carried over,
+  and a fragment only as RFC 3986 section 5.2 carries it), refusing a
+  loop, an empty location, a scheme other than gemini, and asking a
+  `RedirectPolicy` procedure about one to another host.
 - **Errors** are a record of kind (`resolve`, `connect`, `tls`,
   `untrusted`, `changed`, `header`, `truncated`, `timedOut`, `tooLong`)
   and text, as polibtls's `Error`; outside data never halts.
@@ -387,6 +479,12 @@ imported later, read-only; gmni's pins certificates, so not.
 
 ### Gemtext (`GeminiText`, `GeminiTextWriter`)
 
+- **A byte order mark** at the start of a document is skipped, as the
+  specification asks of a client ("Gemini's requirements", "A body's
+  byte order mark"); one anywhere else is text.
+- **A link with no URL** (`=>` alone, or with whitespace), which the
+  grammar allows: a `Link` with an empty URL, flagged `noUrl`, for the
+  program to show as text or leave out; never fetched.
 - **Line types**: `Text`, `Link`, `Heading` (with its level 1..3),
   `ListItem`, `Quote`, `Toggle` (with alt text, on opening), and
   `Preformatted`. A `Line` record has its kind, its text (without the
@@ -460,10 +558,14 @@ Decided with the user, 2026-11-18: the library makes them.
   default, since an identity's hash is what a capsule knows a user
   by), and the pair's files in a directory the program gives. `List`
   gives the identities there with each one's hash (`SHA256:...`, as
-  a server's log shows it) and expiry, read through polibtls
-  (`Tls` can load a pair; whether it can give a certificate's hash
-  without a connection is for Phase 0: else `openssl x509
-  -fingerprint`, as pogemini's TestCerts does).
+  a server's log shows it) and expiry. **polibtls can't read them
+  from a file** (checked in Phase 0: libtls loads a pair into a
+  `Config` but says nothing of a certificate outside a connection, and
+  polibtls has no other access): see "Open questions".
+- **Never made unasked**: the specification forbids making and using a
+  certificate without the user taking part, so nothing in a fetch
+  makes one; a 60 comes back to the program, which asks its user and
+  calls `Make`.
 - **Which identity for which URL** is a program's choice, but a helper
   keeps the common rule: an identity attached to a host and a path
   prefix is offered for every URL under it (as Lagrange and Amfora
@@ -476,8 +578,9 @@ Decided with the user, 2026-11-18: the library makes them.
 The poc runtime uses 10..20, and the po* libraries 61..119
 (polibfyaml 61..65, pofltk 70..78, posockets 80..89, polibtls 90..99,
 pogemini 100..109, pounix 110..119). pogeminilib takes **120..129**,
-to be checked in Phase 0 against every po* library and program, and
-assigned as modules need them:
+unused by every po* library and program under `~/Repos/Oberon`
+(checked in Phase 0: no `ASSERT` or `HALT` with one, nor a constant
+for one), assigned as modules need them:
 
 | Code | Module | Meaning |
 |---|---|---|
@@ -516,7 +619,7 @@ certificates made by a script into `build/certs` (polibtls's
 
 ## Roadmap
 
-### Phase 0: skeleton
+### Phase 0: skeleton [done]
 
 The repository: README.md (with "This software is developed with the
 aid of AI.", as pogemini's), AGENTS.md, this plan, LICENSE (BSD
@@ -535,6 +638,40 @@ Then, before any design depends on them:
 - check the halt code range 120..129 against every po* library and
   program;
 - any new question it raises, put to the user under "Open questions".
+
+Done 2026-11-18. `make test` and `make valgrind` pass with
+`TestCheck` alone, and `make install` refuses while there is no module.
+Found:
+
+- The specifications' rules are under "Gemini's requirements", and the
+  design follows them: the request line in ASCII (punycode for a
+  host), a status below 10 or over 69 refused, a 1x needing a prompt,
+  at most 5 redirects and no query carried over, quoted `lang`
+  values, a byte order mark skipped, the TLS version given, no
+  identity made unasked, a link with no URL flagged.
+- The build of a library: checked with a throwaway module in a copy of
+  the repository: built into `build/lib`, tests linked against it,
+  `make valgrind` clean, `make install` and `make uninstall` (into a
+  scratch `POCLIBDIR`) putting in and taking out both variants, and a
+  changed source rebuilding the library and the tests.
+- `TlsTasks` from a main body with no task works (The client).
+- polibtls can't give a certificate file's hash or expiry (Client
+  certificates; "Open questions").
+- Halt codes 120..129 are free (Halt codes).
+- `gmake test` passes on OpenBSD 7.9 i386 (erekose) and NetBSD 11.0
+  amd64 (terhali), the dependencies from `git archive`s installed in a
+  scratch `POCLIBDIR` (AGENTS.md, "Testing on the BSD hosts"); the
+  library's build there waits for its first module, in Phase 1.
+- posockets' `Sockets.SetDeadline` is only for `SocketTasks`; its own
+  calls ignore it (read 2026-11-18), so the blocking deadline is still
+  to be added. Another way, if posockets' change proves awkward:
+  pounix's `UnixFiles.WaitReadable` with a `WaitWritable` added beside
+  it (a connect and a TLS write wait for writable), since a pounix
+  wait takes any descriptor.
+- poc's users' guide (section 11) says memcheck follows coroutines on
+  Linux and FreeBSD, which contradicts the siblings' note that it
+  can't (AGENTS.md, "Test"): to be tried with the first task test, in
+  Phase 4, and the note corrected if memcheck works.
 
 ### Phase 1: URLs
 
@@ -656,3 +793,13 @@ README.
 - ~~**A limit on a gemtext line's length**~~: none; a long line comes
   out in pieces of the parser's buffer's size (the user, 2026-11-18;
   Gemtext).
+- **An identity's hash and expiry from its file**, for
+  `GeminiIdentities.List` (found in Phase 0; needed in Phase 5). Either
+  (a) polibtls gains it in the same change as the peer's public-key
+  hash, which needs libcrypto's certificate parsing anyway: a
+  certificate file's hash, as `PeerCertHash` gives it, and its
+  `notAfter`; or (b) `List` runs `openssl x509 -fingerprint -sha256
+  -enddate`, as `Make` runs `openssl`, and reads its output, as
+  pogemini's TestCerts does. (a) is recommended: listing needs no
+  program on `PATH` and no output format to parse, and the same code
+  is tested on every host polibtls is.

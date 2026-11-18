@@ -28,13 +28,14 @@ libtls and Gemini clients that applies here unchanged:
 
 ## Status
 
-As of 2026-11-18, only the plan: PLAN.md and this file. Nothing is
-built; Phase 0 (the skeleton) is next. Every open question in PLAN.md
-has been decided with the user (struck through there, each recorded
-where it applies); new ones go there as they arise. Two changes in
-other repositories come first: a `poll` with a deadline in posockets
-(before Phase 4) and a peer public-key hash in polibtls (before
-Phase 5).
+As of 2026-11-18, Phase 0 (the skeleton) is done: the GNUmakefile,
+`test/Check.Mod` and `TestCheck`, and no module yet; Phase 1 (URLs and
+`GeminiPunycode`) is next. One question in PLAN.md is open (an
+identity's hash from its file, needed in Phase 5); the rest are
+decided (struck through there, each recorded where it applies). Two
+changes in other repositories come first: a `poll` with a deadline in
+posockets (before Phase 4) and a peer public-key hash in polibtls
+(before Phase 5).
 
 ## Reference material
 
@@ -54,17 +55,27 @@ Phase 5).
 
 ## Build
 
-To be written in Phase 0, after pounix's `GNUmakefile`: the library
-`pogeminilib` built from `src/` into `build/lib` with `-library`, in
-`-OC` (and `-OC -g`), the only size model its dependencies are
-installed in; the tests built against that build, never an installed
-copy; `make deps` checking that polibtls, posockets, poDateTime and
-pounix are installed in `POCLIBDIR` (`~/.local/lib/poc`) and
-were built by the poc in use; `make install` by `poc -install-library`;
-`.NOTPARALLEL`, since poc writes every module's files into one
-`build/`; `POC_LIBRARY_PATH` unexported. **A poc library works only
-with the poc that built it**: after a poc upgrade, reinstall the
-dependencies (poDateTime before polibtls and posockets) and rebuild.
+`make` (`gmake` on the BSDs), after pounix's `GNUmakefile`:
+
+- The library `pogeminilib` is built from `src/` into `build/lib` with
+  `-library`, in `-OC` (and `-OC -g` for install), the only size model
+  its dependencies are installed in. A module joins it by being added
+  to `LIBMODS`, in import order; a test by `TESTS`, a halt test by
+  `HALTTESTS` as `name:code`.
+- The tests are built against that build, never an installed copy
+  (`-library-path build/lib` first).
+- `make deps`, which everything that builds depends on, checks that
+  poDateTime, posockets, polibtls and pounix are installed in
+  `POCLIBDIR` (`~/.local/lib/poc`) and were built by the poc in use.
+- `make install` and `make uninstall` by `poc -install-library`, both
+  variants; install refuses while `LIBMODS` is empty. `make doc`
+  writes `doc/<Module>.md` from the source's comments.
+- `.NOTPARALLEL`, since poc writes every module's files into one
+  `build/`; `POC_LIBRARY_PATH` unexported.
+
+**A poc library works only with the poc that built it**: after a poc
+upgrade, reinstall the dependencies (poDateTime before polibtls and
+posockets) and rebuild.
 
 ## Test
 
@@ -98,6 +109,21 @@ Known from the siblings, to keep in mind from the first test:
 As pogemini's and polibtls's AGENTS.md say, on the same hosts (alerik,
 FreeBSD amd64; artos, NetBSD amd64; yishana, NetBSD i386; jherek,
 OpenBSD amd64; cymoril, OpenBSD i386; not rackhir without asking).
+Those are VMs on the user's machine, not always up; two real
+machines at the user's work serve when they aren't, each with its own
+tools already there (checked 2026-11-18):
+
+- **erekose**, OpenBSD 7.9 **i386**: poc 0.14.0 in `/usr/local`,
+  base clang 19 and libtls, LibreSSL 4.3's `openssl`, `gmake`, `nc`,
+  `gnutls-cli`.
+- **terhali**, NetBSD 11.0 amd64: poc 0.14.0, clang 21, `gmake`,
+  libretls (`/usr/pkg/lib/libtls.so.28`) and OpenSSL 3.6's `openssl`
+  from pkgsrc (11.0/All), `nc`, `gnutls-cli`; no python3, so no `make
+  doc` there.
+
+`ssh <host>` is the user's account, `ssh root@<host>` root's. Neither
+has gemget, valgrind or pogemini, so tests needing them skip there.
+Phase 0's `gmake test` passed on both (2026-11-18).
 Copy the working tree (`tar` less `build/` and `.git`) into a directory
 under `~/tmp` there, with the dependencies from `git archive`s, each
 installed in turn by `gmake install POCLIBDIR=<dir>` there and used by
