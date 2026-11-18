@@ -17,6 +17,10 @@
 # Every program writes the files of the modules it compiles into the same
 # $(BUILD), so make must not build two at once.
 #
+# The client's tests' certificates and keys are made by
+# test/make-certs.sh (polibtls's) into $(CERTS), never committed; they
+# run test/TestServer, built into $(BUILD) too.
+#
 # make install installs the library in $(POCLIBDIR), ~/.local/lib/poc by
 # default, with and without debug information, under -OC, the only size
 # model its dependencies are installed in. poc puts each in
@@ -32,7 +36,13 @@ MODELS := OC
 VARIANTS := $(MODELS) $(addsuffix -g,$(MODELS))
 # --track-fds=yes makes valgrind list the descriptors open at exit; the
 # valgrind target requires that the test opened none of them.
-VALGRIND ?= valgrind --leak-check=full --show-leak-kinds=all --track-fds=yes --error-exitcode=99 --suppressions=poc-gc.supp
+# 60 callers let vg-reachable.sh see whether a block was allocated
+# within tls_init (polibtls's).
+# No --error-exitcode: valgrind counts every descriptor open at exit as
+# an error, Tasks' self-pipe included, so test/vg-errors.sh judges the
+# errors instead. memcheck follows poc's coroutines (PLAN.md, Phase 4),
+# so a test with tasks gets the same checks as the rest.
+VALGRIND ?= valgrind --num-callers=60 --leak-check=full --show-leak-kinds=all --track-fds=yes --suppressions=poc-gc.supp
 
 # An installed library on POC_LIBRARY_PATH would be taken in place of this
 # checkout's source, or would stop the build if another poc wrote it.
@@ -40,11 +50,12 @@ unexport POC_LIBRARY_PATH
 
 BUILD := build
 LIBDIR := $(BUILD)/lib
+CERTS := $(BUILD)/certs
 
 LIBRARY := pogeminilib
 # The library's modules, in import order (PLAN.md, "Library and module
 # names"); each phase adds its own.
-LIBMODS := GeminiPunycode GeminiUrls GeminiText GeminiTextWriter GeminiStatus GeminiHeaders
+LIBMODS := GeminiPunycode GeminiUrls GeminiText GeminiTextWriter GeminiStatus GeminiHeaders GeminiResponses GeminiClient GeminiFetch
 # The installed libraries it needs (PLAN.md, "Foundations").
 DEPLIBS := podatetime posockets polibtls pounix
 
@@ -67,17 +78,26 @@ LIBPATH := -library-path $(LIBDIR) -library-path $(POCLIBDIR)
 LIBSRC := $(LIBMODS:%=src/%.Mod)
 LIBSTAMP := $(if $(LIBMODS),$(LIBDIR)/$(LIBRARY)-OC.stamp)
 # Test programs (test/<name>.Mod, each a main module), run from test/.
-TESTS := TestCheck TestPunycode TestUrls TestText TestHeaders
+TESTS := TestCheck TestPunycode TestUrls TestText TestHeaders TestFetch TestClient
+# The client's tests: their shared modules, the server they run, and its
+# certificates.
+CLIENTTESTS := TestFetch TestClient
+CLIENTDEPS := test/ClientCases.Mod test/Server.Mod test/Child.Mod $(BUILD)/TestServer $(CERTS)/.stamp
 # Programs that must halt (test/<name>.Mod), as name:Assert-code. poc's
 # ASSERT(x, n) prints "assertion failed (n)" on standard error and exits
 # with status 10, so `make test` requires both. Codes 120..129 are this
 # library's (PLAN.md, "Halt codes").
 HALTTESTS := HaltTextBuffer:120 HaltTextRange:121 HaltTextPut:122 HaltTextLevel:123 \
   HaltStatusClass:124 HaltHeaderStatus:124 HaltHeaderLong:125 HaltHeaderControl:125 \
-  HaltHeaderEmpty:125 HaltHeaderRange:126
+  HaltHeaderEmpty:125 HaltHeaderRange:126 HaltWaiter:127 HaltReadRange:128
 ASSERTSTATUS := 10
 
+# Example programs (examples/<name>.Mod), not installed; the client's
+# tests run them.
+EXAMPLES := GeminiGet GeminiFetchAll
+
 TESTBINS := $(TESTS:%=$(BUILD)/%)
+EXAMPLEBINS := $(EXAMPLES:%=$(BUILD)/%)
 HALTBINS := $(foreach h,$(HALTTESTS),$(BUILD)/$(firstword $(subst :, ,$(h))))
 
 .PHONY: all deps tests test valgrind clean install uninstall doc
@@ -85,7 +105,7 @@ HALTBINS := $(foreach h,$(HALTTESTS),$(BUILD)/$(firstword $(subst :, ,$(h))))
 
 all: deps tests
 
-tests: $(TESTBINS) $(HALTBINS)
+tests: $(EXAMPLEBINS) $(TESTBINS) $(HALTBINS) $(BUILD)/TestServer
 
 # Each library in DEPLIBS must be installed in $(POCLIBDIR), by this poc.
 deps:
@@ -109,6 +129,21 @@ $(LIBDIR)/$(LIBRARY)-%.stamp: $(LIBSRC) $(POCBIN) | deps $(BUILD)
 $(TESTBINS): $(BUILD)/%: test/%.Mod test/Check.Mod $(LIBSTAMP) | deps $(BUILD)
 	$(POC) $(POCFLAGS) $(LIBPATH) -import-path test -output-dir $(BUILD) -o $@ $<
 
+$(CLIENTTESTS:%=$(BUILD)/%): $(CLIENTDEPS) $(EXAMPLEBINS)
+
+$(EXAMPLEBINS): $(BUILD)/%: examples/%.Mod $(LIBSTAMP) | deps $(BUILD)
+	$(POC) $(POCFLAGS) $(LIBPATH) -output-dir $(BUILD) -o $@ $<
+
+# The misbehaving server the client's tests run (test/TestServer.Mod).
+$(BUILD)/TestServer: test/TestServer.Mod $(LIBSTAMP) | deps $(BUILD)
+	$(POC) $(POCFLAGS) $(LIBPATH) -output-dir $(BUILD) -o $@ $<
+
+# Made once per build directory; make clean removes them with it.
+$(CERTS)/.stamp: test/make-certs.sh | $(BUILD)
+	rm -rf $(CERTS)
+	test/make-certs.sh $(CERTS)
+	touch $@
+
 $(BUILD)/Halt%: test/Halt%.Mod $(LIBSTAMP) | deps $(BUILD)
 	$(POC) $(POCFLAGS) $(LIBPATH) -output-dir $(BUILD) -o $@ $<
 
@@ -128,18 +163,19 @@ test: all
 	  else echo "FAIL - $$t exited with $$got: $$(cat $(BUILD)/$$t.err)"; status=1; fi; \
 	done; exit $$status
 
-# Each test under valgrind. Besides definite and indirect leaks, every
-# still-reachable block must be the collector's own (test/vg-reachable.sh),
-# and every descriptor open at exit must be one the test inherited
-# (test/vg-fds.sh, from valgrind's --track-fds=yes report). A test with
-# tasks needs --tool=none instead (AGENTS.md, "Test"): added with the
-# first one, in Phase 4.
+# Each test under valgrind. Besides definite and indirect leaks, the
+# only errors may be descriptors open at exit (test/vg-errors.sh); every
+# still-reachable block must be the collector's, the loader's or
+# OpenSSL's (test/vg-reachable.sh), and every descriptor open at exit
+# must be one the test inherited or Tasks' self-pipe (test/vg-fds.sh,
+# from valgrind's --track-fds=yes report).
 valgrind: all
 	@status=0; for t in $(TESTS); do \
 	  echo "== valgrind $$t"; \
 	  (cd test && $(VALGRIND) --log-file=../$(BUILD)/$$t.vg ../$(BUILD)/$$t < /dev/null) || status=1; \
 	  grep -E 'ERROR SUMMARY|lost:|reachable:|FILE DESCRIPTORS' $(BUILD)/$$t.vg; \
-	  test/vg-reachable.sh $(BUILD)/$$t.vg || { echo "FAIL - $$t: still-reachable memory the collector did not allocate"; status=1; }; \
+	  test/vg-errors.sh $(BUILD)/$$t.vg || { echo "FAIL - $$t: memory errors (see $(BUILD)/$$t.vg)"; status=1; }; \
+	  test/vg-reachable.sh $(BUILD)/$$t.vg || { echo "FAIL - $$t: still-reachable memory neither the collector's, the loader's nor OpenSSL's"; status=1; }; \
 	  test/vg-fds.sh $(BUILD)/$$t.vg || { echo "FAIL - $$t: descriptors left open at exit (see $(BUILD)/$$t.vg)"; status=1; }; \
 	done; exit $$status
 

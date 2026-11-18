@@ -437,9 +437,17 @@ As built in Phase 3 (`doc/GeminiStatus.md`, `doc/GeminiHeaders.md`):
   and a fragment only as RFC 3986 section 5.2 carries it), refusing a
   loop, an empty location, a scheme other than gemini, and asking a
   `RedirectPolicy` procedure about one to another host.
-- **Errors** are a record of kind (`resolve`, `connect`, `tls`,
-  `untrusted`, `changed`, `header`, `truncated`, `timedOut`, `tooLong`)
-  and text, as polibtls's `Error`; outside data never halts.
+- **Errors** are a record of kind (`request`, `resolve`, `connect`,
+  `tls`, `untrusted`, `changed`, `header`, `truncated`, `timedOut`,
+  `tooLong`) and text, as polibtls's `Error`; outside data never halts.
+  `request` (Phase 4) is a URL that isn't a gemini URL that can be
+  requested.
+- **The shared code is `GeminiResponses`** (Phase 4): `Options`,
+  `Response`, `Error` and the whole of a fetch, waiting through an
+  abstract `Waiter` (`Connect`, `Await`); `GeminiClient`'s waits
+  through `SocketTasks` and `Tasks`, `GeminiFetch`'s through posockets'
+  `ConnectWithin` and `Await`. Each socket is non-blocking and each TLS
+  call made non-blocking in both, so the only difference is the wait.
 
 ### Trust (`GeminiTrust`)
 
@@ -636,6 +644,8 @@ for one), assigned as modules need them:
 | 124 | `GeminiStatus`, `GeminiHeaders` | `Class`, `Effective` or `Name`: a status outside 10..69; `WriteHeader`: a status the specification doesn't name |
 | 125 | `GeminiHeaders` | `WriteHeader`: a meta over 1024 bytes, not UTF-8, with a control character, or empty after 1x..3x |
 | 126 | `GeminiHeaders` | `Ended` or `Parse`: a length past the array |
+| 127 | `GeminiResponses` | `Waiter.Connect` or `Await` not overridden by an extension |
+| 128 | `GeminiResponses` | `Response.Read`: a position or length outside the buffer |
 
 `GeminiPunycode` and `GeminiUrls` take only outside data, so nothing
 in them halts. Each halt is an `ASSERT`, so it exits with poc's status
@@ -672,8 +682,9 @@ certificates made by a script into `build/certs` (polibtls's
   (skipped, saying so, if not), and gemtext produced by
   `GeminiTextWriter` read back by `GeminiText`. Real capsules on the
   network are checked by hand, never in `make test`.
-- **valgrind** as polibtls's: `--tool=none --track-fds=yes` for
-  programs with tasks, memcheck for the unit tests.
+- **valgrind**: memcheck for every test, those with tasks too, since
+  it follows poc's coroutines (Phase 4); not polibtls's `--tool=none`
+  for them.
 
 ## Roadmap
 
@@ -726,10 +737,11 @@ Found:
   pounix's `UnixFiles.WaitReadable` with a `WaitWritable` added beside
   it (a connect and a TLS write wait for writable), since a pounix
   wait takes any descriptor.
-- poc's users' guide (section 11) says memcheck follows coroutines on
+- ~~poc's users' guide (section 11) says memcheck follows coroutines on
   Linux and FreeBSD, which contradicts the siblings' note that it
   can't (AGENTS.md, "Test"): to be tried with the first task test, in
-  Phase 4, and the note corrected if memcheck works.
+  Phase 4, and the note corrected if memcheck works.~~ It works
+  (Phase 4).
 
 ### Phase 1: URLs [done]
 
@@ -852,7 +864,7 @@ doc`. Decided and found:
   length, an index halt; the last two needed tests added for a `;`
   and an escaped quote inside a skipped parameter's quotes.
 
-### Phase 4: the client
+### Phase 4: the client [done]
 
 `GeminiClient` without trust (nothing checked, or a CA file) and without
 redirects: connect with a deadline, SNI, a client certificate, the
@@ -866,6 +878,70 @@ the same tests against the test server, run from a program with no
 tasks. An example, `examples/GeminiGet.Mod`, a small gemget, on
 `GeminiFetch`, and one fetching several URLs at once on
 `GeminiClient`.
+
+Done 2026-11-18, after posockets' `Sockets.Await` and `ConnectWithin`.
+`make test` (`TestFetch` 55 checks, `TestClient` 62, and halt tests
+127 and 128) and `make valgrind` pass, and `gmake test` on OpenBSD 7.9
+i386 (erekose) and NetBSD 11.0 amd64 (terhali, with pogemini's checks
+too), posockets' working tree installed there. `doc/GeminiResponses.md`,
+`doc/GeminiClient.md` and `doc/GeminiFetch.md` written by `make doc`. `GeminiResponses`,
+`GeminiClient` and `GeminiFetch`; `test/TestServer.Mod`, the
+misbehaving server (its comment lists each fault), run by
+`test/Server.Mod`; `test/ClientCases.Mod`, the checks both APIs run,
+given a fetch procedure; `test/Child.Mod`, for a program run as a
+child; `test/make-certs.sh`, polibtls's, making the certificates into
+`build/certs`. Decided and found:
+
+- **poc 0.14.0's collector frees an empty record's object while it is
+  still reachable**, on 64-bit hosts: an object's data starts after
+  its block's header, and a record with no fields has a block of only
+  that header (16 bytes on amd64), so a pointer to its data points at
+  the next block, which is marked instead. The object is swept, and a
+  method call on it later crashes. On i386 the header is 8 bytes of a
+  16-byte block, so the data stays inside it. `GeminiResponses`'
+  abstract `WaiterDesc` was such a record; it has a field
+  (`notEmpty`) until poc is fixed. A program of 20 lines shows it
+  (an empty record kept in a global, collections forced by garbage:
+  its block's header then reads free, and a method call on it
+  segfaults); the bug is poc's (`GarbageCollectedHeap`,
+  `FindBlock` and `BlockBytesFor`), recorded as bug 28 in
+  Peaseblossom's PLAN.md, "Ongoing bug fixing".
+- **A fetch's stack**: one with an RSA client certificate and a CA
+  file ran in a 24 KiB task stack on amd64 and not in 16 KiB, the TLS
+  handshake being the most of it, so `GeminiClient.stackSize` is 64
+  KiB, as `TlsTasks.stackSize`. ClientCases' own arrays need more:
+  `TestClient` runs it in 1 MiB.
+- **memcheck follows poc's coroutines**, as the users' guide says, and
+  not as the siblings' notes say, which predate poc's fix of
+  2026-11-15 (Peaseblossom's PLAN.md, bug 21): a control that branched on
+  uninitialised `malloc`'d memory and read freed memory, in the main
+  body and again in a task, had all four errors reported, the task's
+  with a stack ending at the task's start. So `make valgrind` runs
+  every test, `TestClient` too, under full memcheck. valgrind 3.27.1
+  counts a descriptor open at exit as an error, and Tasks' self-pipe
+  is two, so no `--error-exitcode`: `test/vg-errors.sh` requires that
+  every error be such a descriptor, which `vg-fds.sh` then judges.
+  (A first control, reading uninitialised locals, showed nothing in
+  main or in a task: they read as zero, so it proved nothing.)
+- `test/vg-reachable.sh` allows, besides the collector's and the
+  loader's, what polibtls's allows: memory allocated within
+  `tls_init` and OpenSSL's caches, kept for the process's life
+  (valgrind with `--num-callers=60` to see `tls_init` in a stack).
+- The checks: each fault of `TestServer`'s as its error kind, with
+  what came before it kept; a stalled header and a stalled body timing
+  out at the deadline; IPv4 and IPv6; SNI sent for a name and not for
+  an address; a client certificate seen by the server; a CA file that
+  verifies and one that doesn't; `maxBody`; closing early; a refused
+  connection, a name that doesn't resolve, URLs that can't be fetched.
+  In tasks, four fetches of 300000 bytes ending whole while a fifth,
+  stalled, waits, and that one timing out at its own deadline.
+- pogemini, installed, served a page, a 100000-byte file and a 51 to
+  `GeminiClient`, and exited 0 after its three connections.
+- The examples are run by the tests: `GeminiGet` (a body of 100000
+  bytes with a CA file, a 51's exit, a stalled body's partial output
+  and "timed out", bad usage) from `TestFetch`; `GeminiFetchAll`, with
+  a stalled URL among others, ending in about its deadline, from
+  `TestClient`.
 
 ### Phase 5: trust, redirects and identities
 

@@ -32,12 +32,14 @@ As of 2026-11-18, Phases 0 (the skeleton), 1 (`GeminiPunycode` and
 `GeminiUrls`, with `TestPunycode` and `TestUrls`) and 2 (`GeminiText`
 and `GeminiTextWriter`, with `TestText` and halt tests 120..123) and 3
 (`GeminiStatus` and `GeminiHeaders`, with `TestHeaders` and halt tests
-124..126) are done; Phase 4 (the client) is next. One question in PLAN.md is open (an
-identity's hash from its file, needed in Phase 5); the rest are
-decided (struck through there, each recorded where it applies). Two
-changes in other repositories come first: a `poll` with a deadline in
-posockets (before Phase 4) and a peer public-key hash in polibtls
-(before Phase 5).
+124..126) and 4 (`GeminiResponses`, `GeminiClient` and
+`GeminiFetch`, with `TestFetch`, `TestClient`, halt tests 127 and 128,
+and the examples `GeminiGet` and `GeminiFetchAll`) are done; Phase 5
+(trust, redirects and identities) is next. One question in PLAN.md is
+open (an identity's hash from its file, needed in Phase 5); the rest
+are decided (struck through there, each recorded where it applies). A
+change in another repository comes first: a peer public-key hash in
+polibtls (before Phase 5).
 
 ## Reference material
 
@@ -106,9 +108,13 @@ Known from the siblings, to keep in mind from the first test:
   whole-record copy carries its uninitialised padding, which poc's
   collector then reads, and memcheck reports it in `DrainMarkStack`
   (PLAN.md, Phase 2).
-- **memcheck can't follow poc's coroutines**: check a program with
-  tasks with `valgrind --tool=none --track-fds=yes`, allowing for the
-  two descriptors `Tasks` keeps open (polibtls's README).
+- **memcheck follows poc's coroutines** (PLAN.md, Phase 4), whatever
+  the siblings' notes say: a program with tasks gets full memcheck,
+  allowing for the two descriptors `Tasks` keeps open, which valgrind
+  counts as errors (`test/vg-errors.sh`, `test/vg-fds.sh`).
+- **No record type with no fields, on the heap**: poc 0.14.0's
+  collector frees such an object while it is still reachable, on
+  64-bit hosts (PLAN.md, Phase 4). An abstract base gets a field.
 
 ## Testing on the BSD hosts
 
@@ -128,8 +134,9 @@ tools already there (checked 2026-11-18):
   doc` there.
 
 `ssh <host>` is the user's account, `ssh root@<host>` root's. Neither
-has gemget, valgrind or pogemini, so tests needing them skip there.
-Phases 1, 2 and 3's `gmake test` passed on both (2026-11-18). A halt
+has gemget or valgrind, and only terhali has pogemini (in
+`~/.local/bin`), so tests needing them skip where they're missing.
+Phases 1 to 4's `gmake test` passed on both (2026-11-18). A halt
 test's `assertion failed (n)` is expected; count only the others.
 Copy the working tree (`tar` less `build/` and `.git`) into a directory
 under `~/tmp` there, with the dependencies from `git archive`s, each
