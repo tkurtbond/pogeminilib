@@ -30,8 +30,9 @@ libtls and Gemini clients that applies here unchanged:
 
 As of 2026-11-18, Phases 0 (the skeleton), 1 (`GeminiPunycode` and
 `GeminiUrls`, with `TestPunycode` and `TestUrls`) and 2 (`GeminiText`
-and `GeminiTextWriter`, with `TestText` and halt tests 120..123) are
-done; Phase 3 (headers and statuses) is next. One question in PLAN.md is open (an
+and `GeminiTextWriter`, with `TestText` and halt tests 120..123) and 3
+(`GeminiStatus` and `GeminiHeaders`, with `TestHeaders` and halt tests
+124..126) are done; Phase 4 (the client) is next. One question in PLAN.md is open (an
 identity's hash from its file, needed in Phase 5); the rest are
 decided (struck through there, each recorded where it applies). Two
 changes in other repositories come first: a `poll` with a deadline in
@@ -128,7 +129,7 @@ tools already there (checked 2026-11-18):
 
 `ssh <host>` is the user's account, `ssh root@<host>` root's. Neither
 has gemget, valgrind or pogemini, so tests needing them skip there.
-Phases 1 and 2's `gmake test` passed on both (2026-11-18). A halt
+Phases 1, 2 and 3's `gmake test` passed on both (2026-11-18). A halt
 test's `assertion failed (n)` is expected; count only the others.
 Copy the working tree (`tar` less `build/` and `.git`) into a directory
 under `~/tmp` there, with the dependencies from `git archive`s, each

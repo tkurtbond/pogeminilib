@@ -10,12 +10,13 @@ cooperative `Tasks` and a blocking one without them, trust on first
 use, client certificates, and gemtext parsed and written; later, the
 server engine of pogemini, a Gemini server, moved here.
 
-**Status: begun.** Phases 0 to 2 of [PLAN.md](PLAN.md) are done:
+**Status: begun.** Phases 0 to 3 of [PLAN.md](PLAN.md) are done:
 `GeminiUrls` (URLs parsed, resolved, written, and checked as a server
 must), `GeminiPunycode` (internationalised host names), `GeminiText`
-(gemtext parsed, a page at a time or streamed in fixed memory) and
-`GeminiTextWriter` (gemtext written); Phase 3, response headers and
-statuses, is next. Their reference is in [doc/](doc/). PLAN.md
+(gemtext parsed, a page at a time or streamed in fixed memory),
+`GeminiTextWriter` (gemtext written), `GeminiStatus` (statuses, their
+classes and names) and `GeminiHeaders` (response headers read and
+written, MIME types parsed); Phase 4, the client, is next. Their reference is in [doc/](doc/). PLAN.md
 has the design and the roadmap; [AGENTS.md](AGENTS.md) has the working
 notes.
 

@@ -146,9 +146,10 @@ pogemini's PLAN.md records the server's.
   host, and punycode is what SNI and DNS need), so a request is the
   same whether its link was written as an IRI or a URI.
 - **The header** (P "Responses"): UTF-8, no byte order mark, two
-  digits and CR LF; a space and the meta after it, which 1x and 2x
-  must have (`prompt = 1*(SP / VCHAR)`, `mimetype`) and 4x, 5x and 6x
-  may leave out (`"50" CRLF` is whole; P's last example). No C0 or C1
+  digits and CR LF; a space and the meta after it, which 1x, 2x and
+  3x must have (`prompt = 1*(SP / VCHAR)`, `mimetype`, a
+  URI-reference) and 4x, 5x and 6x may leave out (`"50" CRLF` is
+  whole; P's last example). No C0 or C1
   control characters in the meta (VCHAR). Its length isn't limited
   by the specification; pogemini's 1024 for the meta is ours
   ("Responses").
@@ -345,20 +346,46 @@ in "Open questions"), in a module of its own, pure Oberon.
 
 ### Responses (`GeminiStatus`, `GeminiHeaders`)
 
-- `ParseHeader(line, h, why)`: status, meta, and refusal of what the
-  specification forbids (no space, a third digit, a status below 10 or
-  over 69, a 1x without a prompt, a control character in the meta,
-  meta over 1024 bytes, a byte order mark, no CR LF within 1029
-  bytes). An unknown status within 10..69 is kept, and `Class` gives
-  its first digit's. A bad header is an error the program sees, never
-  a halt.
-- `Mime(meta, type, params)`: type and subtype lower case, parameters
-  as name and value, a quoted value (`lang="en,fr"`) unquoted;
-  `text/gemini; charset=utf-8` when a 2x's meta is empty, which 0.24.1
-  forbids but servers still send ("Gemini's requirements",
-  "Success").
-- `WriteHeader` for a server, with the checks `GemServer.Header` makes
-  (status 10..69, meta at most 1024 bytes), so `GeminiServer` uses it.
+As built in Phase 3 (`doc/GeminiStatus.md`, `doc/GeminiHeaders.md`):
+
+- `GeminiStatus`: the specification's statuses as constants, and
+  `Valid` (10..69), `Known` (named by the specification), `Class` (the
+  first digit), `Effective` (an unknown one as its class's `x0`) and
+  `Name` (the specification's name, for a program to show). A status
+  outside 10..69 given to `Class`, `Effective` or `Name` halts (124):
+  `Parse` never gives one.
+- `GeminiHeaders.Ended(buf, len, n)`: whether a client has read enough
+  for `Parse`, an LF within `MaxHeader` (1029) bytes or that many
+  without one; `n` is where the body begins. `Parse(line, len, h,
+  why)`: status and meta, or `FALSE` and why, refusing what the
+  specification forbids: a byte order mark; no LF within 1029 bytes;
+  an LF without CR; bytes after the LF; no status, a third digit, a
+  status outside 10..69; no space before a meta; a meta over 1024
+  bytes, not UTF-8, or with a control character (C0, DEL or C1, tab
+  included, as VCHAR excludes them); a 1x with no prompt; a 3x with
+  no URL. An unknown status within 10..69 is kept. A bad header is an
+  error the program sees, never a halt.
+- **Two leniencies**, each what servers send: a 2x with no meta (`20`
+  or `20 `), which 0.24.1 forbids but earlier versions took as
+  `text/gemini; charset=utf-8`; and a space after a 4x..6x with no
+  message after it.
+- `ParseMime(meta, m, why)`: RFC 2045's grammar, its tokens and
+  quoted-strings (backslash escapes), whitespace allowed around `;` and
+  `=` (RFC 822's tokens, which RFC 2045's are). Type and subtype lower
+  case, each at most 127 bytes (RFC 6838); parameter names lower case,
+  values as written, a quoted one unquoted. What isn't a parameter is
+  skipped to the next `;` outside quotes and `m.skipped` set, as the
+  specification says to ignore parameters not understood; only no
+  type or subtype is refused. An empty meta is `text/gemini;
+  charset=utf-8`, with `m.assumed` set. `Is`, `Param` (the first of a
+  name, if repeated) and `Charset` (`utf-8` for a `text/*` without
+  one) read it.
+- `WriteHeader(status, meta, line, len)` for a server, stricter than
+  `GemServer.Header` (10..69, meta at most 1024): it halts on a status
+  the specification doesn't name ("Servers MUST NOT send status codes
+  that are not defined"; 124) and on a meta `Parse` would refuse (over
+  1024 bytes, not UTF-8, a control character, or empty after 1x, 2x or
+  3x; 125). `GeminiServer` (Phase 8) writes its headers with it.
 
 ### The client (`GeminiClient`)
 
@@ -606,6 +633,9 @@ for one), assigned as modules need them:
 | 121 | `GeminiText` | `Feed` or `Parse`: an end or length past the array |
 | 122 | `GeminiTextWriter` | `Writer.Put` not overridden by an extension |
 | 123 | `GeminiTextWriter` | `Heading`: a level not 1..3 |
+| 124 | `GeminiStatus`, `GeminiHeaders` | `Class`, `Effective` or `Name`: a status outside 10..69; `WriteHeader`: a status the specification doesn't name |
+| 125 | `GeminiHeaders` | `WriteHeader`: a meta over 1024 bytes, not UTF-8, with a control character, or empty after 1x..3x |
+| 126 | `GeminiHeaders` | `Ended` or `Parse`: a length past the array |
 
 `GeminiPunycode` and `GeminiUrls` take only outside data, so nothing
 in them halts. Each halt is an `ASSERT`, so it exits with poc's status
@@ -787,11 +817,40 @@ exported pointer to it). Decided and found:
   lookback's test changed) each failed the tests; the one that
   survived, the lookback loop's bound, gives the same result.
 
-### Phase 3: headers and statuses
+### Phase 3: headers and statuses [done]
 
 `GeminiStatus` and `GeminiHeaders`, with `TestHeaders`: every status,
 the class of an unknown one, every malformed header, MIME types and
 parameters, `WriteHeader`'s checks as halt tests.
+
+Done 2026-11-18. `make test` (165 checks in `TestHeaders`, and the six
+halt tests 124..126) and `make valgrind` pass, and `gmake test` on
+OpenBSD 7.9 i386 (erekose) and NetBSD 11.0 amd64 (terhali).
+`doc/GeminiStatus.md` and `doc/GeminiHeaders.md` written by `make
+doc`. Decided and found:
+
+- The design changed where "Responses" now says: `ParseHeader` is
+  `Parse`, with `Ended` to say when a client has read enough;
+  `Mime` is `ParseMime`, with `Is`, `Param` and `Charset`; the
+  record of a parameter is `Parameter` (poc refuses a type and a
+  procedure of one name).
+- `WriteHeader` is stricter than `GemServer.Header`: a status the
+  specification doesn't name, and every meta `Parse` refuses, halt.
+- The empty redirect, which the specification calls "not intended to
+  be valid", is refused by `Parse`, so the client never sees one.
+- A bare LF ends no header: the grammar says CRLF, and accepting LF
+  alone would let a header's end differ between this client and
+  others. Bytes after the LF in what `Parse` is given are refused,
+  since the client gives it exactly `Ended`'s `n`.
+- On refusal `h.status` is 0 and `h.meta` empty, so nothing of a bad
+  header is acted on by mistake.
+- Mutations of the parsers (no C1 check, the C1 bound, `Ended`'s
+  bound, a third digit allowed, the meta's length unchecked, an empty
+  redirect allowed, no backslash escape, no space after `=`, junk after
+  a value, the meta kept on refusal, and `SkipParam`'s quote and escape
+  tracking) each failed the tests, by a `FAIL` or, for the meta's
+  length, an index halt; the last two needed tests added for a `;`
+  and an escaped quote inside a skipped parameter's quotes.
 
 ### Phase 4: the client
 
