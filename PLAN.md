@@ -218,7 +218,9 @@ pogemini's PLAN.md records the server's.
   an empty line is a text line; lines are never joined.
 - **Links** (G "Link lines", "Formal grammar"): `=>`, optional spaces
   or tabs, the URL, then optionally spaces or tabs and a label; the
-  grammar allows whitespace after the label, which the parser drops.
+  grammar allows whitespace after the label, which the parser keeps
+  (Phase 2: a streaming parser would have to hold it, unbounded, to
+  know whether more text follows).
   The URL may be relative; a client MUST NOT connect anywhere just to
   show a link. `=>` with no URL fits the grammar (`URI-reference` may
   be empty): a link with an empty URL, flagged, for the program to
@@ -266,7 +268,7 @@ Decided with the user, 2026-11-18.
 | `GeminiTrust` | TOFU: the known-hosts store and the check against it |
 | `GeminiIdentities` | client certificates: made by `openssl`, kept, listed |
 | `GeminiText` | gemtext: line types, a streaming line parser, a whole-document parser |
-| `GeminiTextWriter` | gemtext written, a line at a time, links percent-encoded |
+| `GeminiTextWriter` | gemtext written, a line at a time; a name's link percent-encoded |
 | `GeminiServer` | (Phase 8) the server engine, from pogemini's `GemServer` |
 
 The split follows what a program needs: a gemtext renderer imports
@@ -496,13 +498,16 @@ imported later, read-only; gmni's pins certificates, so not.
 - **Line types**: `Text`, `Link`, `Heading` (with its level 1..3),
   `ListItem`, `Quote`, `Toggle` (with alt text, on opening), and
   `Preformatted`. A `Line` record has its kind, its text (without the
-  marker and the whitespace the specification says to drop), and for a
-  link its URL as written and its label (empty if none).
+  marker and the whitespace before a heading's text or a link's
+  label), and for a link its URL as written, the label being its text.
 - **A streaming parser**: a `Parser` keeps the preformatting state and
-  any part line, takes bytes as they come (`Feed(buf, pos, len)`) and
-  hands out each line (`Next(l)`), and `Finish` the last line without
-  an end; so a client parses a body as `GeminiClient` reads it. Line
-  ends LF or CR LF; a lone CR is left as text.
+  any part line, takes bytes as they come and hands out each piece
+  (`Feed(p, buf, pos, end, l)`, called until it gives `FALSE`), and
+  `Finish` the last line without an end; so a client parses a body as
+  `GeminiClient` reads it. Line ends LF or CR LF; a lone CR is left as
+  text. (Feed and Next were to be two calls; they are one, since
+  Oberon can't keep a reference to the caller's array between them and
+  copying it would undo the bounded memory.)
 - **No limit on a line's length, and bounded memory** (the user's
   idea, 2026-11-18): the parser's buffer has a fixed size, given when
   it is made, and a line longer than it comes out in pieces, each as
@@ -523,17 +528,15 @@ imported later, read-only; gmni's pins certificates, so not.
   as such bytes are anywhere. (A piece may still end between a
   character and a combining mark after it; joining the pieces mends
   that, and a renderer that doesn't join treats a piece's end as a
-  place it may wrap.) A link's URL must lie within its first piece; one that
-  doesn't is cut there and flagged (`urlTooLong`), the rest of it
-  dropped and the label, if any, coming in the later pieces as usual:
-  a request is at most 1024 bytes, so no URL that long can be fetched
-  anyway, and the size of a buffer may not be less than 2048 (a halt
-  if it is). A renderer that wraps text needs nothing more; one that
+  place it may wrap.) A link's URL has a buffer of its own, of
+  `MaxURL` (1024) bytes: a longer one is cut there and flagged
+  (`urlTooLong`), the rest of it dropped, since a request is at most
+  1024 bytes and no longer URL can be fetched; the label comes in the
+  text's pieces as usual. So what `Parse` gives doesn't depend on the
+  buffer's size, which need only be `MinBuffer` (8; a halt if less):
+  room for a four-byte character after a cut, so every piece makes
+  progress. A renderer that wraps text needs nothing more; one that
   wants whole lines joins the pieces, or uses `Parse`.
-- **The minimum buffer and the piece flags are to be confirmed in
-  Phase 2** by the tests: the concatenation of a line's pieces equal
-  to the line `Parse` gives, however the input is cut and whatever the
-  buffer's size.
 - **A document**: `Parse(text)` gives a list of `Line`s, for a program
   that has the whole page; a `Document` can say its first heading (a
   title) and its links.
@@ -542,12 +545,19 @@ imported later, read-only; gmni's pins certificates, so not.
   nothing but itself.
 - **Malformed input never halts**: bytes that aren't UTF-8 are kept as
   they are and reported by a flag, not refused; a renderer decides.
-- **The writer** writes each line type to a `Files.Rider`, or through a
-  procedure a server's `Exchange` provides, encoding a link's URL as
-  pogemini's listings do (all but RFC 3986's unreserved), and it can't
-  be made to write a text line another kind would claim (a text line
-  beginning `=>`, `#`, `* `, `>` or ```` ``` ````): gemtext has no
-  escape, so the writer says so (`FALSE`), and the program chooses.
+- **The writer** writes each line type to a `Files.Rider`
+  (`FileWriter`), or through a `Writer` extension's `Put`, as a
+  server's `Exchange` will. `Link` writes a URL as given (encoding a
+  whole URL would encode its `:` and `/`); `NameLink` encodes a name
+  of one segment as pogemini's listings do (all but RFC 3986's
+  unreserved). Gemtext has no escape, so what would read back as
+  something else is refused (`FALSE`, and why), and the program
+  chooses: a text line another kind would claim (beginning `=>`, `#`,
+  `* `, `>` or ```` ``` ````), a line end in any line, a line of the
+  wrong kind inside or outside a block, a preformatted line of three
+  backticks, whitespace a reader drops (before a heading's text or a
+  label; a byte order mark beginning the page), and a URL empty or
+  holding a space or a control character.
 
 ### Client certificates (`GeminiIdentities`)
 
@@ -592,9 +602,16 @@ for one), assigned as modules need them:
 
 | Code | Module | Meaning |
 |---|---|---|
+| 120 | `GeminiText` | `New`: a buffer smaller than `MinBuffer` |
+| 121 | `GeminiText` | `Feed` or `Parse`: an end or length past the array |
+| 122 | `GeminiTextWriter` | `Writer.Put` not overridden by an extension |
+| 123 | `GeminiTextWriter` | `Heading`: a level not 1..3 |
 
-None yet: `GeminiPunycode` and `GeminiUrls` take only outside data,
-so nothing in them halts.
+`GeminiPunycode` and `GeminiUrls` take only outside data, so nothing
+in them halts. Each halt is an `ASSERT`, so it exits with poc's status
+10 and prints `assertion failed (n)`, which the halt tests look for:
+`HALT(n)` exits with status n instead, and poc refuses
+`ASSERT(FALSE, n)` as always false.
 
 ### Testing
 
@@ -725,7 +742,7 @@ written by `make doc`. Found:
   percent-encodes it, so only a space or a control character, which
   can't be in a link at all, is refused.
 
-### Phase 2: gemtext
+### Phase 2: gemtext [done]
 
 `GeminiText` and `GeminiTextWriter` ("Gemtext"), with `TestText`: each
 line type, the streaming parser equal to the whole-document one however
@@ -734,6 +751,41 @@ lines many times the buffer's size, a UTF-8 sequence at a piece's end,
 a link's URL longer than the first piece, malformed UTF-8 kept and flagged, the writer's output
 read back. No network; before the client, since it needs nothing of
 it and a program can use it at once (rendering files from disk).
+
+Done 2026-11-18. `make test` (121 checks in `TestText`, and the four
+halt tests 120..123) and `make valgrind` pass, and `gmake test` on
+OpenBSD 7.9 i386 (erekose) and NetBSD 11.0 amd64 (terhali).
+`doc/GeminiText.md` and `doc/GeminiTextWriter.md` written by `make
+doc` (whose `mkref.py` no longer shows a private record after an
+exported pointer to it). Decided and found:
+
+- The design changed where "Gemtext" now says: `Feed` and `Next` one
+  call; the URL in a buffer of its own, so `MinBuffer` is 8, not 2048;
+  a label's trailing whitespace kept; `Link` writing a URL as given and
+  `NameLink` encoding a name.
+- The tests check every piece: none but a line's last shorter than the
+  buffer less four, url and its flags on the first piece only,
+  `malformed` equal to whether the joined line is UTF-8; and that the
+  pieces joined are `Parse`'s lines, for buffers of 8 to 24 bytes and
+  then doubling to 6000, the page fed in chunks of 1, 2, 3, 5, 7, 64,
+  1000 bytes and whole, and every split of a short page in two.
+- A BOM is skipped only as the page's first three bytes (a page of
+  only one has no lines); CR CR LF is a line of one CR; a 0X byte is
+  kept, so `len`, not the 0X, is a line's length; a closing toggle's
+  rest is dropped, an opening one's alt text kept as written.
+- poc has no `+` for string constants ("operands must both be numeric
+  or both SET"); the writer writes a marker and the text by separate
+  `Put`s.
+- **valgrind and a stack record's padding**: copying a whole `Line`
+  from the stack into a heap array carries its uninitialised padding
+  there, and poc's collector then reads it, which memcheck reports in
+  `GarbageCollectedHeap.DrainMarkStack` (45384 errors; `poc-gc.supp`
+  covers only `MarkCandidate`). Found with `--track-origins`; fixed by
+  copying field by field (`GeminiText.Add`, the test's `Take`).
+- Mutations of the parser (no cut at the buffer's end, a CR dropped,
+  the carried bytes lost, url flags on later pieces, no BOM skip, the
+  lookback's test changed) each failed the tests; the one that
+  survived, the lookback loop's bound, gives the same result.
 
 ### Phase 3: headers and statuses
 

@@ -28,9 +28,10 @@ libtls and Gemini clients that applies here unchanged:
 
 ## Status
 
-As of 2026-11-18, Phases 0 (the skeleton) and 1 (`GeminiPunycode` and
-`GeminiUrls`, with `TestPunycode` and `TestUrls`) are done; Phase 2
-(gemtext) is next. One question in PLAN.md is open (an
+As of 2026-11-18, Phases 0 (the skeleton), 1 (`GeminiPunycode` and
+`GeminiUrls`, with `TestPunycode` and `TestUrls`) and 2 (`GeminiText`
+and `GeminiTextWriter`, with `TestText` and halt tests 120..123) are
+done; Phase 3 (headers and statuses) is next. One question in PLAN.md is open (an
 identity's hash from its file, needed in Phase 5); the rest are
 decided (struck through there, each recorded where it applies). Two
 changes in other repositories come first: a `poll` with a deadline in
@@ -100,6 +101,10 @@ Known from the siblings, to keep in mind from the first test:
   something on first use.
 - **Ignore `SIGPIPE`** (`Sockets.IgnoreBrokenPipe`) in any program that
   writes to a peer, or a peer that goes away kills it.
+- **Copy a record from the stack into the heap field by field**: a
+  whole-record copy carries its uninitialised padding, which poc's
+  collector then reads, and memcheck reports it in `DrainMarkStack`
+  (PLAN.md, Phase 2).
 - **memcheck can't follow poc's coroutines**: check a program with
   tasks with `valgrind --tool=none --track-fds=yes`, allowing for the
   two descriptors `Tasks` keeps open (polibtls's README).
@@ -123,7 +128,8 @@ tools already there (checked 2026-11-18):
 
 `ssh <host>` is the user's account, `ssh root@<host>` root's. Neither
 has gemget, valgrind or pogemini, so tests needing them skip there.
-Phase 1's `gmake test` passed on both (2026-11-18).
+Phases 1 and 2's `gmake test` passed on both (2026-11-18). A halt
+test's `assertion failed (n)` is expected; count only the others.
 Copy the working tree (`tar` less `build/` and `.git`) into a directory
 under `~/tmp` there, with the dependencies from `git archive`s, each
 installed in turn by `gmake install POCLIBDIR=<dir>` there and used by

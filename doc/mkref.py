@@ -145,8 +145,8 @@ def declarations(lines, start):
             if re.search(r"\bRECORD\b", decl) and not re.search(r"\bEND\b", decl):
                 record_depth = 1
                 field_comment = []
-        elif code and not decl.rstrip().endswith(";"):
-            code.append(line)  # a continuation
+        elif code and not code[-1].split("(*")[0].rstrip().endswith(";"):
+            code.append(line)  # a continuation of the declaration before
     flush()
     return groups
 
