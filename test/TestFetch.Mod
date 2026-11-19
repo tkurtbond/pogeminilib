@@ -25,9 +25,13 @@ BEGIN
   RETURN Child.Wait(c, out^, len)
 END Get;
 
+(* Its output goes on the heap: the compiler inlines Shell into Example, and a
+   buffer this large in Example's frame, never written before
+   GeminiIdentities.Load allocates, is stale stack the collector scans
+   and may follow, which memcheck reports in DrainMarkStack. *)
 PROCEDURE Shell(cmd: ARRAY OF CHAR): BOOLEAN;
-  VAR c: Child.Child; out: ARRAY 4096 OF CHAR; n: LONGINT;
-BEGIN RETURN Child.Spawn(cmd, "", 0, c) & (Child.Wait(c, out, n) = 0)
+  VAR c: Child.Child; out: GeminiResponses.Chars; n: LONGINT;
+BEGIN NEW(out, 4096); RETURN Child.Spawn(cmd, "", 0, c) & (Child.Wait(c, out^, n) = 0)
 END Shell;
 
 PROCEDURE Example;

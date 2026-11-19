@@ -260,8 +260,9 @@ BEGIN
   Check.Check(ok, "bytes after a header that has no body are ignored");
   Local("/cuthead", link);
   ok := fetch(link, o, r) & (r.status = 51) & ~r.complete
-    & (r.error.kind = GeminiResponses.truncated);
-  Check.Check(ok, "51 without close_notify: its header, not complete, truncated")
+    & (r.error.kind = GeminiResponses.truncated)
+    & Check.Contains(r.error.text, "the response ended without close_notify (");
+  Check.Check(ok, "51 without close_notify: its header, not complete, truncated, saying so")
 END Statuses;
 
 PROCEDURE Faults;
@@ -284,8 +285,13 @@ BEGIN
   Check.Check(ok & Check.Contains(r.error.text, "no header"), "no response at all: header");
   Local("/cut", link);
   ok := fetch(link, o, r) & (r.status = 20) & ~r.ReadAll(body, len);
-  Check.Check(ok & (body^ = "partial") & ~r.complete & (r.error.kind = GeminiResponses.truncated),
-    "a body without close_notify: what came, and truncated");
+  Check.Check(ok & (body^ = "partial") & ~r.complete & (r.error.kind = GeminiResponses.truncated)
+    & Check.Contains(r.error.text, "the body ended without close_notify, so it may be incomplete ("),
+    "a body without close_notify: what came, and truncated, saying so");
+  Local("/cutinhead", link);
+  ok := ~fetch(link, o, r) & (r.error.kind = GeminiResponses.header)
+    & Check.Contains(r.error.text, "the response ended in its header, without close_notify (");
+  Check.Check(ok, "a header cut off without close_notify: header, saying so");
 
   o.deadline := 300;
   Local("/stall", link);

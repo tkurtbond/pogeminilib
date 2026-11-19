@@ -19,6 +19,7 @@ MODULE TestServer; (* a Gemini server that misbehaves on purpose, for the client
      /empty        nothing
      /cut          20 and "partial", then a close without close_notify
      /cuthead      51, then a close without close_notify
+     /cutinhead    "20 text/gem", then a close without close_notify
      /junk         51, and bytes after its header
      /stall        nothing, until the client goes away
      /stallbody    20 and "partial", then nothing, as /stall
@@ -186,6 +187,7 @@ BEGIN
   ELSIF path = "/empty" THEN
   ELSIF path = "/cut" THEN Append(t^, i, "20 text/gemini"); CrLf(t^, i); Append(t^, i, "partial"); cut := TRUE
   ELSIF path = "/cuthead" THEN Append(t^, i, "51 gone"); CrLf(t^, i); cut := TRUE
+  ELSIF path = "/cutinhead" THEN Append(t^, i, "20 text/gem"); cut := TRUE
   ELSIF path = "/junk" THEN Append(t^, i, "51 gone"); CrLf(t^, i); Append(t^, i, "junk after the header")
   ELSIF path = "/stall" THEN stall := TRUE
   ELSIF path = "/stallbody" THEN

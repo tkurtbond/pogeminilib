@@ -694,7 +694,43 @@ certificates made by a script into `build/certs` (polibtls's
 - **Interoperability**: the client against `pogemini` if installed
   (skipped, saying so, if not), and gemtext produced by
   `GeminiTextWriter` read back by `GeminiText`. Real capsules on the
-  network are checked by hand, never in `make test`.
+  network are checked by hand, never in `make test`: a few requests,
+  as a person browsing makes, one at a time or one per host at once;
+  never the rough cases (stalls, cuts, deadlines), which stay with
+  `TestServer`, nor an identity or stored input on others' servers.
+
+  **Checked by hand, 2026-11-19**, with `GeminiGet`, `GeminiFetchAll`
+  and `GeminiBrowse`, against geminiprotocol.net, gemini.conman.org,
+  kennedy.gemi.dev, bbs.geminispace.org, gemini.circumlunar.space and
+  tilde.team, all as designed: trust on first use and known keys
+  passing silently; a page rendered, wrapped (UTF-8, emoji included)
+  and its links followed and listed; a redirect on the same host
+  followed (`/docs` to `/docs/`) and one to another host asked about;
+  an input prompt (10) answered and the query encoded; a 30 KB page
+  streamed whole; TLS 1.3 where looked at (geminiprotocol.net,
+  kennedy.gemi.dev). **tilde.team ends without
+  close_notify**: its body all comes, `truncated` as designed, and the
+  browser shows it with its note, as the specification asks; but
+  `r.error.text` was libtls's own ("read failed: error:0A000126:SSL
+  routines::unexpected eof while reading"), which tells a person
+  little. Now it says what happened, with libtls's text after it in
+  parentheses: "the body ended without close_notify, so it may be
+  incomplete (...)", or, before the body, "the response ended without
+  close_notify" or "the response ended in its header, without
+  close_notify" (TestServer's `/cut`, `/cuthead`, `/cutinhead`).
+  libtls's text differs between OpenSSL and LibreSSL, so it isn't
+  matched on: any read error but `wouldBlock` and `closed` is an end
+  without close_notify. Changing `Receive` moved stale stack in
+  `TestFetch.Example` (which `Shell`, inlined, made 4 KiB of, unwritten
+  when `GeminiIdentities.Load` allocates) far enough that the collector
+  followed a stale word and memcheck reported it in `DrainMarkStack`;
+  `Shell`'s buffer is on the heap now. `gmake test` passed with it on
+  all five BSD VMs, 970 ok each (2026-11-19). A key is kept on first contact, the handshake, even if no
+  response follows (gemini.thebackupbox.net, below), as "Trust" says.
+  The client torture test, at gemini.conman.org/test/torture/, is
+  now a permanent redirect to gemini.thebackupbox.net, which finishes
+  the handshake but never answers, over IPv4 or IPv6, to gemget either:
+  not checked. warmedal.se (Antenna) didn't accept a connection.
 - **valgrind**: memcheck for every test, those with tasks too, since
   it follows poc's coroutines (Phase 4); not polibtls's `--tool=none`
   for them.

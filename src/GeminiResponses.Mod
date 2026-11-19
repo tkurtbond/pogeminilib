@@ -295,11 +295,19 @@ END Send;
 (* Reads up to len bytes into buf[pos..] from the connection, at least
    one, in n: TRUE; or FALSE at the end, with n = 0, r.complete if it
    was close_notify, and if not r.error of kind ended (truncated for
-   the body, header for the header); or FALSE with r.error on failure.
-   The connection is closed at the end and on failure; afterwards,
-   FALSE, with r as it was. *)
+   the body, header for the header), its text cut; or FALSE with
+   r.error on failure (what, and why). The connection is closed at the
+   end and on failure; afterwards, FALSE, with r as it was.
+
+   A read that fails, rather than waits, is an end without
+   close_notify, whatever ended it: a server that closed without one
+   (common: tilde.team, PLAN.md, "Testing"), a reset, an attacker. So
+   cut says that, in words a person can read, and libtls's text, which
+   differs between OpenSSL and LibreSSL and tells most people little
+   ("read failed: error:0A000126:SSL routines::unexpected eof while
+   reading"), follows it in parentheses, for whoever looks further. *)
 PROCEDURE Receive(r: Response; VAR buf: ARRAY OF CHAR; pos, len: LONGINT;
-    VAR n: LONGINT; ended: INTEGER; what-: ARRAY OF CHAR): BOOLEAN;
+    VAR n: LONGINT; ended: INTEGER; what-, cut-: ARRAY OF CHAR): BOOLEAN;
 BEGIN
   n := 0;
   IF r.conn = NIL THEN RETURN FALSE END;
@@ -308,7 +316,9 @@ BEGIN
     ELSIF r.conn.error.kind = Tls.closed THEN
       r.complete := TRUE; ClearError(r.error); Finish(r, TRUE); RETURN FALSE
     ELSIF r.conn.error.kind # Tls.wouldBlock THEN
-      Fail(r, ended, what, r.conn.error.text^); Finish(r, FALSE); RETURN FALSE
+      Fail(r, ended, cut, ""); Append(r.error.text, " (");
+      Append(r.error.text, r.conn.error.text^); Append(r.error.text, ")");
+      Finish(r, FALSE); RETURN FALSE
     ELSIF ~Wait(r, r.conn.error.want, what) THEN
       Finish(r, FALSE); RETURN FALSE
     END
@@ -329,7 +339,8 @@ BEGIN
     INC(r.rest, n);
     RETURN TRUE
   END;
-  RETURN Receive(r, buf, pos, len, n, truncated, "reading the body")
+  RETURN Receive(r, buf, pos, len, n, truncated, "reading the body",
+    "the body ended without close_notify, so it may be incomplete")
 END Get;
 
 (* Reads up to len bytes of the body into buf[pos..], waiting for them,
@@ -474,7 +485,8 @@ PROCEDURE ReadHeader(r: Response): BOOLEAN;
 BEGIN
   len := 0;
   WHILE ~GeminiHeaders.Ended(r.head^, len, n) DO
-    IF ~Receive(r, r.head^, len, LEN(r.head^) - len, m, header, "reading the header") THEN
+    IF ~Receive(r, r.head^, len, LEN(r.head^) - len, m, header, "reading the header",
+        "the response ended in its header, without close_notify") THEN
       IF r.complete THEN
         r.complete := FALSE;
         IF len = 0 THEN Fail(r, header, "the response has no header", "")
@@ -501,7 +513,8 @@ PROCEDURE ReadEnd(r: Response);
   VAR n, total: LONGINT;
 BEGIN
   r.rest := r.restEnd; total := 0;
-  WHILE Receive(r, r.head^, 0, LEN(r.head^), n, truncated, "reading the response") DO
+  WHILE Receive(r, r.head^, 0, LEN(r.head^), n, truncated, "reading the response",
+      "the response ended without close_notify") DO
     INC(total, n);
     IF total > Most THEN
       Fail(r, tooLong, "over 64 KiB after a header that has no body", "");
