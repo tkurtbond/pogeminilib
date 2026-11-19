@@ -354,6 +354,18 @@ BEGIN
   RETURN TRUE
 END Listen;
 
+(* Closes the listeners, for a program that listens and then finds it
+   can't serve, as pogemini when it fails to become another user once
+   it listens as root: exiting with them open leaves them to the
+   kernel, which pogemini's make valgrind reports. Serve then halts
+   (133), as before Listen; nothing if not listening. *)
+PROCEDURE (s: Server) Close*;
+  VAR i: INTEGER;
+BEGIN
+  FOR i := 0 TO s.n - 1 DO Sockets.Close(s.listeners[i]) END;
+  s.n := 0
+END Close;
+
 (* Serves count connections (0: until a signal stops it), then waits for
    them to end, having closed the listeners. Call it from the program's
    main body: it runs every task. A signal caught since Listen stops it

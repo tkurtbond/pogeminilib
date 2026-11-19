@@ -41,8 +41,9 @@ example browser `GeminiBrowse`, with `TestBrowse`, `Scopes.Covering`,
 and pounix's `UnixTerminals` for status 11; 2 memcheck errors in the
 browser left open, to investigate later) and 7 (the BSDs: each phase
 run there as it finished, nothing Linux-only found) are done; Phase 8
-(the server engine, moved from pogemini, where another session works)
-is next. The questions in PLAN.md
+(the server engine, moved from pogemini) has its steps 1
+(`GeminiServer`, with the example `GeminiServe`) and 2 (pogemini using
+this library; its PLAN.md, "pogeminilib") done. The questions in PLAN.md
 are all decided (struck through there, each recorded where it
 applies). The changes Phase 5 needed in another repository are made:
 polibtls's `Connection.PeerKeyHash` and its `TlsCerts` module, in

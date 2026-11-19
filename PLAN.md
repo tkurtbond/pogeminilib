@@ -1185,6 +1185,26 @@ has finished (step 2). Decided as it was written:
   with pogemini's HEAD installed in `~/.local/bin` there for
   TestClient), with no core and no assertion but the halt tests'.
 
+**Step 2, in pogemini (2026-11-18):** pogemini uses this library, as
+its PLAN.md, "pogeminilib", records: `GemServer` and `GemRequest` are
+gone, its log is a `Logger` writing the same line, and a listing is
+written by `GeminiTextWriter` through a `Writer` of its own that
+gathers lines into 16 KiB pieces, since `GeminiServer.Writer` writes
+each part of a line as it comes, a TLS record each. pogemini's
+`TestParse` went with `GemRequest`; its cases were already here, all
+but the IPv6 literal of 255 bytes (accepted) and 256 (refused), added
+to `TestUrls` now.
+
+**`Server.Close` (2026-11-19):** pogemini's new `make valgrind`, which
+runs the server under memcheck too, found its listeners open at exit
+when it fails to become another user: it listens as root, for a port
+below 1024, then becomes the user, and a server that can't had no way
+to close its listeners but `Serve`. `Close` closes them; `Serve` after
+it halts (133), as before `Listen`. `TestServe` checks, in its own
+process, that a client connects before `Close`, is refused after, and
+that `Close` again does nothing. `make test` passes on Linux (948 ok),
+and memcheck of `TestServe` finds nothing but Tasks' two descriptors.
+
 ### Phase 9: documentation and install
 
 README.md as the user's guide (requirements, building, installing, an

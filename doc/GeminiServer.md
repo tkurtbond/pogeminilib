@@ -189,6 +189,14 @@ PROCEDURE (s: Server) Listen*(host-: ARRAY OF CHAR; port: INTEGER;
 
 Listens on port at host, "" for every local address (IPv6 and IPv4 alike), port 0 for one the kernel chooses: s.port says which. It catches SIGTERM and SIGINT from here on, not only in Serve, so a signal sent as soon as the port is known (by a program that started the server on port 0) stops it cleanly rather than killing it.
 
+#### Close
+
+```oberon
+PROCEDURE (s: Server) Close*;
+```
+
+Closes the listeners, for a program that listens and then finds it can't serve, as pogemini when it fails to become another user once it listens as root: exiting with them open leaves them to the kernel, which pogemini's make valgrind reports. Serve then halts (133), as before Listen; nothing if not listening.
+
 #### Serve
 
 ```oberon

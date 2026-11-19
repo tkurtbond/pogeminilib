@@ -18,6 +18,11 @@ VAR
 (* The server's check. *)
 
 (* url parses, to host, port, path and, if query isn't "-", query. *)
+PROCEDURE Length(s-: ARRAY OF CHAR): LONGINT;
+  VAR n: LONGINT;
+BEGIN n := 0; WHILE (n < LEN(s)) & (s[n] # 0X) DO INC(n) END; RETURN n
+END Length;
+
 PROCEDURE Good(url, host: ARRAY OF CHAR; port: LONGINT; path, query: ARRAY OF CHAR);
   VAR ok: BOOLEAN; label: ARRAY 1100 OF CHAR;
 BEGIN
@@ -27,7 +32,10 @@ BEGIN
   IF query = "-" THEN ok := ok & ~r.hasQuery & (r.query = "")
   ELSE ok := ok & r.hasQuery & (r.query = query)
   END;
-  COPY(url, label); IF LEN(url) > 100 THEN label := "(the 1024-byte URL)" END;
+  COPY(url, label);
+  IF Length(url) = 1024 THEN label := "(the 1024-byte URL)"
+  ELSIF Length(url) > 100 THEN label := "(a long URL)"
+  END;
   C.Check(ok, label);
   IF ~ok THEN
     Out.String("  status "); Out.Int(status, 0); Out.String(" "); Out.String(why);
@@ -163,8 +171,13 @@ BEGIN
   Good(u, "h", 1965, "/😀", "-");
 
 
-  (* Not in pogemini's: an IPv6 address too long for the host, which
-     pogemini copied in unchecked. *)
+  (* An IPv6 address too long for the host, which pogemini once copied
+     in unchecked: the longest r.host holds, 255 bytes, and longer. *)
+  u := "gemini://["; FOR i := 10 TO 264 DO u[i] := "a" END; u[265] := "]"; u[266] := "/"; u[267] := 0X;
+  FOR i := 0 TO 254 DO p[i] := "a" END; p[255] := 0X;
+  Good(u, p, 1965, "/", "-");
+  u := "gemini://["; FOR i := 10 TO 265 DO u[i] := "a" END; u[266] := "]"; u[267] := "/"; u[268] := 0X;
+  Bad("an IPv6 address of 256 bytes", u, 59, "a malformed IPv6 address");
   u := "gemini://["; FOR i := 10 TO 309 DO u[i] := "a" END; u[310] := "]"; u[311] := "/"; u[312] := 0X;
   Bad("an IPv6 address of 300 bytes", u, 59, "a malformed IPv6 address")
 END Server;

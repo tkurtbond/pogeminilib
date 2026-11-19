@@ -10,10 +10,10 @@ MODULE TestServe; (* GeminiServer, in GeminiServe, against a raw client *)
    a third and must be dropped at the server's deadline. Then the
    server, told how many connections to serve, must exit 0 with a line
    in its log, by its Logger, for each. Once more with an RSA key
-   pair. *)
+   pair. First, in this process, a server that listens and closes. *)
 
-IMPORT Out, Platform, Tasks, Sockets, SocketTasks, Check, Child,
-  RawClient, GeminiIdentities;
+IMPORT Out, Platform, Tasks, Sockets, SocketTasks, Tls, Check, Child,
+  RawClient, GeminiIdentities, GeminiServer;
 
 CONST
   Certs = "../build/certs/";
@@ -242,10 +242,41 @@ BEGIN
   END
 END Hash;
 
+PROCEDURE NotFound(x: GeminiServer.Exchange);
+BEGIN
+  IF x.Header(51, "not found") THEN END
+END NotFound;
+
+(* A server that listens and then closes, as pogemini does when it
+   can't become another user: its port takes connections until Close,
+   and none after; Close again does nothing. In this process, since
+   GeminiServe never closes without serving. *)
+PROCEDURE Close;
+  VAR s: GeminiServer.Server; c: Sockets.Socket; err: Sockets.Error;
+BEGIN
+  s := GeminiServer.New(Tls.NewServer(), NotFound);
+  IF ~s.Listen("127.0.0.1", 0, err) THEN
+    Check.Check(FALSE, "Close: the server listens"); Out.String("  "); Out.String(err.text); Out.Ln;
+    RETURN
+  END;
+  IF Sockets.Connect("127.0.0.1", s.port, c, err) THEN
+    Check.Check(TRUE, "Close: before it, a client connects"); Sockets.Close(c)
+  ELSE Check.Check(FALSE, "Close: before it, a client connects")
+  END;
+  s.Close;
+  IF Sockets.Connect("127.0.0.1", s.port, c, err) THEN
+    Check.Check(FALSE, "Close: after it, a client is refused"); Sockets.Close(c)
+  ELSE Check.Check(TRUE, "Close: after it, a client is refused")
+  END;
+  s.Close;
+  Check.Check(TRUE, "Close: again, nothing")
+END Close;
+
 PROCEDURE Main;
   VAR c: Child.Child; t: Test; rsa: Rsa; port: INTEGER; i: LONGINT;
     log: ARRAY 65536 OF CHAR; line: ARRAY 1200 OF CHAR;
 BEGIN
+  Close;
   Hash("client1-ec", hash);
   IF ~Start("ec", Count, c, port) THEN
     Check.Check(FALSE, "the server starts and says its port");
