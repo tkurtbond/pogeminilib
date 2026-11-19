@@ -271,7 +271,7 @@ Decided with the user, 2026-11-18.
 | `GeminiIdentities` | client certificates: made by `openssl`, kept, listed |
 | `GeminiText` | gemtext: line types, a streaming line parser, a whole-document parser |
 | `GeminiTextWriter` | gemtext written, a line at a time; a name's link percent-encoded |
-| `GeminiServer` | (Phase 8) the server engine, from pogemini's `GemServer` |
+| `GeminiServer` | the server engine, from pogemini's `GemServer` (Phase 8) |
 
 The split follows what a program needs: a gemtext renderer imports
 `GeminiText` alone, with no TLS; a URL tool `GeminiUrls` alone.
@@ -639,7 +639,9 @@ The poc runtime uses 10..20, and the po* libraries 61..119
 pogemini 100..109, pounix 110..119). pogeminilib takes **120..129**,
 unused by every po* library and program under `~/Repos/Oberon`
 (checked in Phase 0: no `ASSERT` or `HALT` with one, nor a constant
-for one), assigned as modules need them:
+for one), assigned as modules need them; when Phase 8 found them all
+taken, it went on to **130..133** (130..199 checked unused the same
+way, 2026-11-18; the next is 134):
 
 | Code | Module | Meaning |
 |---|---|---|
@@ -653,6 +655,10 @@ for one), assigned as modules need them:
 | 127 | `GeminiResponses` | `Waiter.Connect` or `Await` not overridden by an extension |
 | 128 | `GeminiResponses` | `Response.Read`: a position or length outside the buffer |
 | 129 | `GeminiTrust` | `Store.Check` not overridden by an extension |
+| 130 | `GeminiServer` | `Exchange.Header` a second time |
+| 131 | `GeminiServer` | `Exchange.Write` after a header other than 2x |
+| 132 | `GeminiServer` | a `Responder` returned without a header |
+| 133 | `GeminiServer` | `Server.Serve` before a `Listen` succeeded |
 
 `GeminiPunycode` and `GeminiUrls` take only outside data, so nothing
 in them halts. Each halt is an `ASSERT`, so it exits with poc's status
@@ -1131,6 +1137,53 @@ own repository and plan: `GemServer` replaced by `GeminiServer`,
 BSD host before the change is kept; pogeminilib becomes one of its
 `DEPLIBS`. This library's client tests may then use `GeminiServer` for
 their test server.
+
+**Step 1, here (2026-11-18):** `GeminiServer` is written, with its
+tests, and pogemini is untouched until the other session working there
+has finished (step 2). Decided as it was written:
+
+- **What stays as `GemServer` had it**: listeners on both families,
+  an accept task each with a 200 ms tick, backlog 128, a task per
+  connection at `TlsTasks.stackSize` within the deadline (10000 ms),
+  the limit on connections (256), the 1026-byte request read and its
+  59 without the Responder, the lingering close (2000 ms),
+  `StopRequests.Catch` in `Listen` (before a program prints its port)
+  and `IgnoreBrokenPipe` in `Serve`. The Responder and Exchange are
+  `GemServer`'s, with `request` the line as sent; checking it is
+  `GeminiUrls.CheckRequest`'s, called by the Responder, since what is
+  served (hosts, ports, paths) is the program's policy.
+- **The log is a `Logger`**, `(s, event, x, why)`, called for each
+  connection served (`served`) or failed (`failed`, with why), an
+  accept that failed (`acceptFailed`), and the stop (`stopping`, with
+  `s.signal` and `s.active`; then `stopped`), each from a task that
+  doesn't wait in it, so a program's lines never mix. No Logger, no
+  log. The time, the format and where it goes are the program's: the
+  example writes pogemini's line, as TestServe and TestRun read it.
+- **A header by `GeminiHeaders.WriteHeader`**, so a status or meta the
+  specification forbids halts (124, 125) as a programmer's error, and
+  a body only after 2x (131).
+- **A page by a `GeminiServer.Writer`**, a `GeminiTextWriter.Writer`
+  writing to an exchange, so a Responder writes gemtext a line at a
+  time, each line checked.
+- **`Init` as well as `New`**, so a program can extend `ServerDesc`
+  with what its Responder needs (pogemini's configuration), reaching it
+  through `x.server`.
+- **The example `GeminiServe`** stands in for pogemini in the moved
+  tests: `-cert`, `-key`, `-listen`, `-port`, `-host`, `-n`,
+  `-deadline` and `-connections` as pogemini's, a page at "/" written
+  by a Writer, input at "/hello", 53 for another host or port.
+  pogemini's `-user` is its own policy, so its checks stay there.
+- **The tests**: `TestServe` and `TestRun` from pogemini's, with
+  `RawClient` (pogemini's `GemClient`) and `Child.Interrupt`; the
+  client certificate's hash by `GeminiIdentities.Load` (polibtls's
+  `TlsCerts`), not `openssl x509`; halt tests 130..132 through
+  `test/ServeOnce`, one exchange with a server in the test's process.
+  `make test` passes on Linux (943 ok), and memcheck of `GeminiServe`
+  serving five requests finds no errors but Tasks' two descriptors and
+  nothing lost. `gmake test` passes on all five BSD VMs (FreeBSD
+  amd64, NetBSD and OpenBSD amd64 and i386; 943 ok each, as on Linux,
+  with pogemini's HEAD installed in `~/.local/bin` there for
+  TestClient), with no core and no assertion but the halt tests'.
 
 ### Phase 9: documentation and install
 

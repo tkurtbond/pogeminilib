@@ -55,7 +55,7 @@ CERTS := $(BUILD)/certs
 LIBRARY := pogeminilib
 # The library's modules, in import order (PLAN.md, "Library and module
 # names"); each phase adds its own.
-LIBMODS := GeminiPunycode GeminiUrls GeminiText GeminiTextWriter GeminiStatus GeminiHeaders GeminiTrust GeminiResponses GeminiIdentities GeminiClient GeminiFetch
+LIBMODS := GeminiPunycode GeminiUrls GeminiText GeminiTextWriter GeminiStatus GeminiHeaders GeminiTrust GeminiResponses GeminiIdentities GeminiClient GeminiFetch GeminiServer
 # The installed libraries it needs (PLAN.md, "Foundations").
 DEPLIBS := podatetime posockets polibtls pounix
 
@@ -78,23 +78,28 @@ LIBPATH := -library-path $(LIBDIR) -library-path $(POCLIBDIR)
 LIBSRC := $(LIBMODS:%=src/%.Mod)
 LIBSTAMP := $(if $(LIBMODS),$(LIBDIR)/$(LIBRARY)-OC.stamp)
 # Test programs (test/<name>.Mod, each a main module), run from test/.
-TESTS := TestCheck TestPunycode TestUrls TestText TestHeaders TestTrust TestRedirects TestIdentities TestFetch TestClient TestBrowse
+TESTS := TestCheck TestPunycode TestUrls TestText TestHeaders TestTrust TestRedirects TestIdentities TestFetch TestClient TestBrowse TestServe TestRun
 # The client's tests: their shared modules, the server they run, and its
 # certificates.
 CLIENTTESTS := TestTrust TestRedirects TestIdentities TestFetch TestClient TestBrowse
 CLIENTDEPS := test/ClientCases.Mod test/Server.Mod test/Child.Mod $(BUILD)/TestServer $(CERTS)/.stamp
+# The server's tests (moved from pogemini): the raw client they send
+# with, and the example server they run.
+SERVERTESTS := TestServe TestRun
+SERVERDEPS := test/RawClient.Mod test/Child.Mod $(BUILD)/GeminiServe $(CERTS)/.stamp
 # Programs that must halt (test/<name>.Mod), as name:Assert-code. poc's
 # ASSERT(x, n) prints "assertion failed (n)" on standard error and exits
-# with status 10, so `make test` requires both. Codes 120..129 are this
+# with status 10, so `make test` requires both. Codes 120..133 are this
 # library's (PLAN.md, "Halt codes").
 HALTTESTS := HaltTextBuffer:120 HaltTextRange:121 HaltTextPut:122 HaltTextLevel:123 \
   HaltStatusClass:124 HaltHeaderStatus:124 HaltHeaderLong:125 HaltHeaderControl:125 \
-  HaltHeaderEmpty:125 HaltHeaderRange:126 HaltWaiter:127 HaltReadRange:128 HaltTrustStore:129
+  HaltHeaderEmpty:125 HaltHeaderRange:126 HaltWaiter:127 HaltReadRange:128 HaltTrustStore:129 \
+  HaltServerHeader:130 HaltServerWrite:131 HaltServerNoHeader:132 HaltServerListen:133
 ASSERTSTATUS := 10
 
-# Example programs (examples/<name>.Mod), not installed; the client's
-# tests run them.
-EXAMPLES := GeminiGet GeminiFetchAll GeminiBrowse
+# Example programs (examples/<name>.Mod), not installed; the tests
+# run them.
+EXAMPLES := GeminiGet GeminiFetchAll GeminiBrowse GeminiServe
 
 TESTBINS := $(TESTS:%=$(BUILD)/%)
 EXAMPLEBINS := $(EXAMPLES:%=$(BUILD)/%)
@@ -130,6 +135,7 @@ $(TESTBINS): $(BUILD)/%: test/%.Mod test/Check.Mod $(LIBSTAMP) | deps $(BUILD)
 	$(POC) $(POCFLAGS) $(LIBPATH) -import-path test -output-dir $(BUILD) -o $@ $<
 
 $(CLIENTTESTS:%=$(BUILD)/%): $(CLIENTDEPS) $(EXAMPLEBINS)
+$(SERVERTESTS:%=$(BUILD)/%): $(SERVERDEPS)
 
 $(EXAMPLEBINS): $(BUILD)/%: examples/%.Mod $(LIBSTAMP) | deps $(BUILD)
 	$(POC) $(POCFLAGS) $(LIBPATH) -output-dir $(BUILD) -o $@ $<
@@ -145,7 +151,11 @@ $(CERTS)/.stamp: test/make-certs.sh | $(BUILD)
 	touch $@
 
 $(BUILD)/Halt%: test/Halt%.Mod $(LIBSTAMP) | deps $(BUILD)
-	$(POC) $(POCFLAGS) $(LIBPATH) -output-dir $(BUILD) -o $@ $<
+	$(POC) $(POCFLAGS) $(LIBPATH) -import-path test -output-dir $(BUILD) -o $@ $<
+
+# The server's halt tests run one exchange (test/ServeOnce.Mod).
+$(BUILD)/HaltServerHeader $(BUILD)/HaltServerWrite $(BUILD)/HaltServerNoHeader: \
+  test/ServeOnce.Mod test/RawClient.Mod $(CERTS)/.stamp
 
 # Run every test from test/; report all, fail at the end if any failed.
 # Each halt test must exit with poc's ASSERT status and name its Assert

@@ -1,10 +1,11 @@
 MODULE Child; (* A command run as a child process, for the tests *)
 
-(* A command, such as test/TestServer or pogemini, run as a child
-   process for the client's tests (copied from polibtls's test/), through pounix's
-   UnixProcesses, with UnixFiles' WaitReadable for ReadLine's time
-   limit. Spawn, Wait and ReadLine wait in the kernel and so stop every
-   task: call them outside tasks. *)
+(* A command, such as test/TestServer, pogemini or GeminiServe, run as
+   a child process for the tests (copied from polibtls's test/, with
+   pogemini's Interrupt), through pounix's UnixProcesses, with
+   UnixFiles' WaitReadable for ReadLine's time limit. Spawn, Wait and
+   ReadLine wait in the kernel and so stop every task: call them
+   outside tasks. *)
 
 IMPORT UnixErrors, UnixFiles, UnixProcesses;
 
@@ -42,21 +43,22 @@ BEGIN
 END Spawn;
 
 (* Waits for c to end: its output, standard error included, as much as
-   fits in got, and how much there was in all; its exit status, or -1
-   if it didn't exit normally or never started. *)
+   fits in got, with a 0X after it, and how much there was in all; its
+   exit status, or -1 if it didn't exit normally or never started. *)
 PROCEDURE Wait*(VAR c: Child; VAR got: ARRAY OF CHAR; VAR gotlen: LONGINT): INTEGER;
-  VAR err: UnixErrors.Error; rest: ARRAY 4096 OF CHAR; n: LONGINT;
+  VAR err: UnixErrors.Error; rest: ARRAY 4096 OF CHAR; keep, n: LONGINT;
 BEGIN
-  gotlen := 0;
+  gotlen := 0; keep := LEN(got) - 1; got[0] := 0X;
   IF c.p = NIL THEN RETURN -1 END;
   LOOP
-    IF gotlen < LEN(got) THEN
-      IF ~UnixFiles.Read(c.p.out, got, gotlen, LEN(got) - gotlen, n, err) THEN EXIT END
+    IF gotlen < keep THEN
+      IF ~UnixFiles.Read(c.p.out, got, gotlen, keep - gotlen, n, err) THEN EXIT END
     ELSIF ~UnixFiles.Read(c.p.out, rest, 0, LEN(rest), n, err) THEN EXIT
     END;
     IF n = 0 THEN EXIT END;
     INC(gotlen, n)
   END;
+  IF gotlen < keep THEN got[gotlen] := 0X ELSE got[keep] := 0X END;
   UnixProcesses.Close(c.p);
   IF UnixProcesses.Wait(c.p, err) & c.p.exited THEN RETURN c.p.status END;
   RETURN -1
@@ -91,5 +93,13 @@ PROCEDURE Kill*(VAR c: Child);
 BEGIN
   IF (c.p # NIL) & UnixProcesses.Signal(c.p, UnixProcesses.terminate, err) THEN END
 END Kill;
+
+(* Sends c SIGINT, as Control-C would; nothing for a child that never
+   started. *)
+PROCEDURE Interrupt*(VAR c: Child);
+  VAR err: UnixErrors.Error;
+BEGIN
+  IF (c.p # NIL) & UnixProcesses.Signal(c.p, UnixProcesses.interrupt, err) THEN END
+END Interrupt;
 
 END Child.
