@@ -35,11 +35,13 @@ and `GeminiTextWriter`, with `TestText` and halt tests 120..123) and 3
 124..126) and 4 (`GeminiResponses`, `GeminiClient` and
 `GeminiFetch`, with `TestFetch`, `TestClient`, halt tests 127 and 128,
 and the examples `GeminiGet` and `GeminiFetchAll`) are done; Phase 5
-(trust, redirects and identities) is next. One question in PLAN.md is
-open (an identity's hash from its file, needed in Phase 5); the rest
-are decided (struck through there, each recorded where it applies). A
-change in another repository comes first: a peer public-key hash in
-polibtls (before Phase 5).
+(trust, redirects and identities) is next. The questions in PLAN.md
+are all decided (struck through there, each recorded where it
+applies). The changes Phase 5 needed in another repository are made:
+polibtls's `Connection.PeerKeyHash` and its `TlsCerts` module, in
+Oberon, with `TlsCerts.CertHash` and `TlsCerts.Validity` for an
+identity's hash and expiry from its file, installed 2026-11-18 (its
+PLAN.md, "The peer's public key" and "A certificate's validity").
 
 ## Reference material
 

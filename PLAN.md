@@ -466,11 +466,15 @@ As built in Phase 3 (`doc/GeminiStatus.md`, `doc/GeminiHeaders.md`):
   `PeerCertProvided`, `Hash`, `Subject`, `Issuer`, `NotBefore`,
   `NotAfter`, `ContainsName`), so **polibtls gains, with its tests, a
   SHA-256 of the peer's SubjectPublicKeyInfo**, in its repository,
-  before Phase 5. How (libtls's `tls_peer_cert_chain_pem` and
-  libcrypto, with both OpenSSL's libtls and LibreSSL's) is to be
-  verified there; the result written `SHA256:` and lowercase hex, as
+  before Phase 5, written `SHA256:` and lowercase hex, as
   `PeerCertHash` is, and checked against `openssl x509 -pubkey | openssl
-  pkey -pubin -outform DER | openssl dgst -sha256`.
+  pkey -pubin -outform DER | openssl dgst -sha256`. Done 2026-11-18:
+  `Connection.PeerKeyHash`, from `tls_peer_cert_chain_pem` (the peer's
+  certificate first) and a new module, `TlsCerts`, in Oberon rather
+  than libcrypto (with the user: NetBSD's `-L/usr/pkg/lib` could link a
+  second libcrypto); `TlsCerts.KeyHash` and `CertHash` read a
+  certificate file too. Tested on Linux and the five BSD hosts
+  (polibtls's PLAN.md, "The peer's public key").
 - The store is a text file a line per host, at a path the program
   gives (decided with the user, 2026-11-18: the library chooses no
   location; an example program uses
@@ -611,10 +615,11 @@ Decided with the user, 2026-11-18: the library makes them.
   default, since an identity's hash is what a capsule knows a user
   by), and the pair's files in a directory the program gives. `List`
   gives the identities there with each one's hash (`SHA256:...`, as
-  a server's log shows it) and expiry. **polibtls can't read them
-  from a file** (checked in Phase 0: libtls loads a pair into a
-  `Config` but says nothing of a certificate outside a connection, and
-  polibtls has no other access): see "Open questions".
+  a server's log shows it) and expiry, from polibtls's
+  `TlsCerts.CertHash` and `TlsCerts.Validity` on the certificate's
+  file (libtls says nothing of a certificate outside a connection,
+  found in Phase 0, so polibtls reads the file's PEM itself, in
+  Oberon; decided 2026-11-18, "Open questions").
 - **Never made unasked**: the specification forbids making and using a
   certificate without the user taking part, so nothing in a fetch
   makes one; a 60 comes back to the program, which asks its user and
@@ -725,7 +730,8 @@ Found:
   changed source rebuilding the library and the tests.
 - `TlsTasks` from a main body with no task works (The client).
 - polibtls can't give a certificate file's hash or expiry (Client
-  certificates; "Open questions").
+  certificates; "Open questions"). Since 2026-11-18 it can:
+  `TlsCerts.CertHash` and `TlsCerts.Validity`.
 - Halt codes 120..129 are free (Halt codes).
 - `gmake test` passes on OpenBSD 7.9 i386 (erekose) and NetBSD 11.0
   amd64 (terhali), the dependencies from `git archive`s installed in a
@@ -946,7 +952,10 @@ child; `test/make-certs.sh`, polibtls's, making the certificates into
 ### Phase 5: trust, redirects and identities
 
 First, in polibtls's repository, with its tests, and reinstalled: the
-peer's public-key hash (Trust). Then `GeminiTrust` (TOFU, its file,
+peer's public-key hash (Trust), and a certificate file's hash and
+expiry (Client certificates); done 2026-11-18, `PeerKeyHash`,
+`TlsCerts.CertHash` and `TlsCerts.Validity`. Then
+`GeminiTrust` (TOFU, its file,
 the expiry rule) and `FetchFollowing`, with `TestTrust` and
 `TestRedirects`: first contact, the same certificate, a renewed one
 with the same key passing, a new key refused before the request is
@@ -1022,7 +1031,7 @@ README.
 - ~~**A limit on a gemtext line's length**~~: none; a long line comes
   out in pieces of the parser's buffer's size (the user, 2026-11-18;
   Gemtext).
-- **An identity's hash and expiry from its file**, for
+- ~~**An identity's hash and expiry from its file**, for
   `GeminiIdentities.List` (found in Phase 0; needed in Phase 5). Either
   (a) polibtls gains it in the same change as the peer's public-key
   hash, which needs libcrypto's certificate parsing anyway: a
@@ -1031,4 +1040,14 @@ README.
   -enddate`, as `Make` runs `openssl`, and reads its output, as
   pogemini's TestCerts does. (a) is recommended: listing needs no
   program on `PATH` and no output format to parse, and the same code
-  is tested on every host polibtls is.
+  is tested on every host polibtls is. Since 2026-11-18 (a) is half
+  there without libcrypto: `TlsCerts.CertHash` gives a certificate
+  file's hash as `PeerCertHash` does; its `notAfter` would be one more
+  step of the same DER walk (validity's UTCTime or GeneralizedTime, to
+  Unix seconds), in `TlsCerts`.~~ (a) (the user, 2026-11-18; Client
+  certificates): polibtls's `TlsCerts.CertHash` and
+  `TlsCerts.Validity` (notBefore and notAfter in Unix seconds, from
+  PEM text; RFC 5280's UTCTime and GeneralizedTime), in Oberon, tested
+  against openssl on every test certificate (polibtls's PLAN.md, "A
+  certificate's validity"). `List` reads the certificate file and
+  passes its text; no `openssl` at run time, no C.
