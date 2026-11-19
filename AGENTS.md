@@ -42,8 +42,10 @@ and pounix's `UnixTerminals` for status 11; 2 memcheck errors in the
 browser left open, to investigate later) and 7 (the BSDs: each phase
 run there as it finished, nothing Linux-only found) and 8 (the
 server engine, moved from pogemini: `GeminiServer`, with the example
-`GeminiServe`, and pogemini using it, its PLAN.md, "pogeminilib") are
-done; Phase 9 (documentation and install) is next. The questions in PLAN.md
+`GeminiServe`, and pogemini using it, its PLAN.md, "pogeminilib") and
+9 (documentation and install: README.md the user's guide, an example
+per module, `make install` checked on Linux and the BSDs) are done,
+every phase of the roadmap. The questions in PLAN.md
 are all decided (struck through there, each recorded where it
 applies). The changes Phase 5 needed in another repository are made:
 polibtls's `Connection.PeerKeyHash` and its `TlsCerts` module, in
