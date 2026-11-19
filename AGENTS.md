@@ -39,7 +39,9 @@ and the examples `GeminiGet` and `GeminiFetchAll`) and 5 (`GeminiTrust`,
 `TestRedirects`, `TestIdentities` and halt test 129) and 6 (the
 example browser `GeminiBrowse`, with `TestBrowse`, `Scopes.Covering`,
 and pounix's `UnixTerminals` for status 11; 2 memcheck errors in the
-browser left open, to investigate later) are done; Phase 7 (the BSDs)
+browser left open, to investigate later) and 7 (the BSDs: each phase
+run there as it finished, nothing Linux-only found) are done; Phase 8
+(the server engine, moved from pogemini, where another session works)
 is next. The questions in PLAN.md
 are all decided (struck through there, each recorded where it
 applies). The changes Phase 5 needed in another repository are made:

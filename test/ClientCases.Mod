@@ -137,6 +137,7 @@ BEGIN
   Check.Check(StartsWith(r.version, "TLSv1.") & StartsWith(r.peerHash, "SHA256:"),
     "the TLS version and the server's fingerprint are given");
   Check.Check(r.url.host = "localhost", "url is what was fetched");
+  Check.Check((r.host = "localhost") & (r.port = port), "host and port, as connected to");
 
   Url("127.0.0.1", port, "/", link);
   ok := Echo(link, o, r, url, sni, cert);
@@ -148,6 +149,10 @@ BEGIN
   ok := Echo(link, o, r, url, sni, cert);
   Check.Check(ok & (sni = "localhost") & Check.Contains(url, "/a?b"),
     "the host as written is sent lowercased by SNI, the query as it is");
+  Check.Check(r.host = "localhost", "... and given lowercased in host, as a trust store knows it");
+  Url("[::1]", port, "/", link);
+  ok := Echo(link, o, r, url, sni, cert);
+  Check.Check(ok & (r.host = "::1"), "an IPv6 address in host, without its brackets");
 
   (* A client certificate *)
   Cert("client1-ec.crt", o.certFile); Cert("client1-ec.key", o.keyFile);
@@ -340,7 +345,8 @@ BEGIN
   ok := ~fetch("gemini://user@localhost/", o, r) & (r.error.kind = GeminiResponses.request);
   Check.Check(ok, "userinfo: request");
   ok := ~fetch("gemini:///path", o, r) & (r.error.kind = GeminiResponses.request);
-  Check.Check(ok, "no host: request")
+  Check.Check(ok, "no host: request");
+  Check.Check((r.host = "") & (r.port = 0), "... and no host or port given")
 END Urls;
 
 (* All of the checks, fetching with f from TestServer at port. *)

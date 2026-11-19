@@ -1058,11 +1058,15 @@ What it found:
   covers a URL but not at what path, which `id off` on a page beneath
   needs for `Detach`. Added `Scopes.Covering`, with checks in
   `TestIdentities`.
-- **Trusting a changed key** needs the store's own name for the host:
-  the program repeats `GeminiPunycode.ToAscii(r.url.host)` and
-  `GeminiUrls.Port`, as `GeminiResponses` does. It works; it is a
-  second place that must agree with the first. A field on `Response`
-  (the host as the store knows it) would end that; not added yet.
+- **Trusting a changed key** needed the store's own name for the host:
+  the program repeated `GeminiPunycode.ToAscii(r.url.host)` and
+  `GeminiUrls.Port`, as `GeminiResponses` does, a second place that
+  had to agree with the first. Decided 2026-11-18 (the user): `Response`
+  gives them, `host` (the URL's host in ASCII, as connected to and as
+  the store knows it) and `port` (1965 if the URL gave none), "" and 0
+  if the fetch failed before; `Open` already worked them out, so they
+  cost no time, only about 260 bytes a `Response`. The browser trusts
+  `r.host` and `r.port`; `ClientCases` checks them for both fetchers.
 - **Input not echoed (status 11)**: the library had no call to turn a
   terminal's echo off, and the browser ran `stty -echo` through
   `UnixProcesses`. pounix gained `UnixTerminals` for it (its Phase 10:
@@ -1098,13 +1102,22 @@ What it found:
   `r` (set to NIL, no change), and the whole-record copy `p.url :=
   r.url` (a field-by-field copy, no change).
 
-### Phase 7: the BSDs
+### Phase 7: the BSDs [done]
 
 `gmake test` on FreeBSD, NetBSD and OpenBSD, amd64 and i386, as
 pogemini's Phase 7 and AGENTS.md, "Testing on the BSD hosts"; anything
 Linux-only fixed here and the finding recorded in AGENTS.md. Each
 networked phase before this is run on at least one BSD host as it
 finishes, so nothing waits until here to be found.
+
+Done that way: every phase was run on the BSDs as it finished (Phases
+1 to 4 also on erekose and terhali), so nothing was left for here, and
+nothing Linux-only turned up. Closed 2026-11-18, after `Response`'s
+`host` and `port` (Phase 6, "What it found"), with `gmake test` run
+again on all five VMs (alerik, artos, yishana, jherek, cymoril):
+exit 0, 884 ok each, Linux's 890 less the 6 that need pogemini
+installed, with the dependencies' HEADs (pounix fd77666, polibtls
+d935372).
 
 ### Phase 8: the server engine
 

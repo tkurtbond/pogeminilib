@@ -85,6 +85,8 @@ ResponseDesc* = RECORD
   peerHash-: ARRAY 128 OF CHAR;
   keyHash-: ARRAY 128 OF CHAR;
   notAfter-: HUGEINT;
+  host-: ARRAY GeminiPunycode.MaxHost + 2 OF CHAR;  (* and a final ".", and 0X *)
+  port-: LONGINT;
   trust-: INTEGER;
   bodyRead-: LONGINT;
   complete-: BOOLEAN;
@@ -92,7 +94,7 @@ ResponseDesc* = RECORD
 END;
 ```
 
-A response. url is what was fetched; status and meta its header; version the TLS version agreed ("TLSv1.3"), for a program to warn when a client certificate went over TLS 1.2, as the specification asks; peerHash the server certificate's fingerprint ("SHA256:" and hex); keyHash the fingerprint of its public key, the one the trust store knows it by ("SHA256:" and hex), and notAfter the certificate's expiry (Unix seconds); trust what the store's Check said (GeminiTrust.known .. failed), or -1 if none was asked. bodyRead counts the body's bytes read so far. complete: the response has ended with close_notify; while it is FALSE after the end, error says why.
+A response. url is what was fetched; status and meta its header; version the TLS version agreed ("TLSv1.3"), for a program to warn when a client certificate went over TLS 1.2, as the specification asks; peerHash the server certificate's fingerprint ("SHA256:" and hex); keyHash the fingerprint of its public key, the one the trust store knows it by ("SHA256:" and hex), and notAfter the certificate's expiry (Unix seconds); host and port the server as it was connected to and as the trust store knows it, the URL's host in ASCII (Punycode, GeminiPunycode.ToAscii) and its port, 1965 if it gave none, so a program trusting a changed key (Store.Trust) names it as the store does; "" and 0 if the fetch failed before that. trust what the store's Check said (GeminiTrust.known .. failed), or -1 if none was asked. bodyRead counts the body's bytes read so far. complete: the response has ended with close_notify; while it is FALSE after the end, error says why.
 
 ```oberon
 Chars* = POINTER TO ARRAY OF CHAR;

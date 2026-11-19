@@ -114,8 +114,13 @@ TYPE
      asks; peerHash the server certificate's fingerprint ("SHA256:" and
      hex); keyHash the fingerprint of its public key, the one the trust
      store knows it by ("SHA256:" and hex), and notAfter the
-     certificate's expiry (Unix seconds); trust what the store's Check
-     said (GeminiTrust.known .. failed), or -1 if none was asked.
+     certificate's expiry (Unix seconds); host and port the server as
+     it was connected to and as the trust store knows it, the URL's host
+     in ASCII (Punycode, GeminiPunycode.ToAscii) and its port, 1965 if
+     it gave none, so a program trusting a changed key (Store.Trust)
+     names it as the store does; "" and 0 if the fetch failed before
+     that. trust what the store's Check said (GeminiTrust.known ..
+     failed), or -1 if none was asked.
      bodyRead counts the body's bytes read so far. complete: the
      response has ended with close_notify; while it is FALSE after the
      end, error says why. *)
@@ -128,6 +133,8 @@ TYPE
     peerHash-: ARRAY 128 OF CHAR;
     keyHash-: ARRAY 128 OF CHAR;
     notAfter-: HUGEINT;
+    host-: ARRAY GeminiPunycode.MaxHost + 2 OF CHAR;  (* and a final ".", and 0X *)
+    port-: LONGINT;
     trust-: INTEGER;
     bodyRead-: LONGINT;
     complete-: BOOLEAN;
@@ -383,7 +390,7 @@ END ReadAll;
 PROCEDURE Start(r: Response; w: Waiter; VAR opts: Options);
 BEGIN
   r.w := w; r.status := 0; r.meta := ""; r.version := ""; r.peerHash := "";
-  r.keyHash := ""; r.notAfter := 0; r.trust := -1;
+  r.keyHash := ""; r.notAfter := 0; r.host := ""; r.port := 0; r.trust := -1;
   r.bodyRead := 0; r.complete := FALSE; ClearError(r.error);
   r.s := NIL; r.conn := NIL; r.end := 0; r.maxBody := opts.maxBody;
   NEW(r.head); r.rest := 0; r.restEnd := 0
@@ -409,13 +416,12 @@ BEGIN
   RETURN c
 END NewConfig;
 
-(* Asks store about the server r is connected to, host (ASCII) and
-   port: FALSE, with r.error, if it refuses it. *)
-PROCEDURE Trusted(r: Response; store: GeminiTrust.Store; VAR host: ARRAY OF CHAR;
-    port: LONGINT): BOOLEAN;
+(* Asks store about the server r is connected to, r.host and r.port:
+   FALSE, with r.error, if it refuses it. *)
+PROCEDURE Trusted(r: Response; store: GeminiTrust.Store): BOOLEAN;
   VAR why: ARRAY MaxText + 1 OF CHAR;
 BEGIN
-  r.trust := store.Check(host, port, r.keyHash, r.notAfter, GeminiTrust.Now(), why);
+  r.trust := store.Check(r.host, r.port, r.keyHash, r.notAfter, GeminiTrust.Now(), why);
   CASE r.trust OF
     GeminiTrust.known, GeminiTrust.added, GeminiTrust.replaced: RETURN TRUE
   | GeminiTrust.changed: Fail(r, changed, why, "")
@@ -428,17 +434,17 @@ END Trusted;
 (* Connects, makes the TLS connection, and completes its handshake,
    which checks the server's certificate as the options say. *)
 PROCEDURE Open(r: Response; VAR opts: Options): BOOLEAN;
-  VAR host: ARRAY 256 OF CHAR; why: ARRAY MaxText + 1 OF CHAR;
-    c: Tls.Config; err: Sockets.Error; s: Tls.String; port: LONGINT; kind: INTEGER;
+  VAR why: ARRAY MaxText + 1 OF CHAR;
+    c: Tls.Config; err: Sockets.Error; s: Tls.String; kind: INTEGER;
 BEGIN
-  IF ~GeminiPunycode.ToAscii(r.url.host, host, why) THEN
+  IF ~GeminiPunycode.ToAscii(r.url.host, r.host, why) THEN
     Fail(r, request, "the host", why); RETURN FALSE
   END;
+  r.port := GeminiUrls.Port(r.url);
   c := NewConfig(r, opts);
   IF c = NIL THEN RETURN FALSE END;
-  port := GeminiUrls.Port(r.url);
   IF opts.deadline > 0 THEN r.end := Sockets.Now() + opts.deadline END;
-  IF ~r.w.Connect(host, SHORT(port), opts.deadline, r.s, err) THEN
+  IF ~r.w.Connect(r.host, SHORT(r.port), opts.deadline, r.s, err) THEN
     IF err.kind = Sockets.name THEN kind := resolve
     ELSIF err.kind = Sockets.timedOut THEN kind := timedOut
     ELSE kind := connect
@@ -448,7 +454,7 @@ BEGIN
   (* The host is the name sent by SNI and the one a CA-signed
      certificate must name; for an IP address libtls sends no SNI, as
      the specification asks, and checks the certificate's IP names. *)
-  IF ~Tls.ConnectSocket(c, r.s.fd, host, r.conn) THEN
+  IF ~Tls.ConnectSocket(c, r.s.fd, r.host, r.conn) THEN
     Fail(r, tls, "TLS", r.conn.error.text^); r.conn := NIL; c.Close; Finish(r, FALSE);
     RETURN FALSE
   END;
@@ -458,7 +464,7 @@ BEGIN
   s := r.conn.PeerCertHash(); IF s # NIL THEN COPY(s^, r.peerHash) END;
   s := r.conn.PeerKeyHash(); IF s # NIL THEN COPY(s^, r.keyHash) END;
   r.notAfter := r.conn.PeerCertNotAfter();
-  RETURN (opts.trust = NIL) OR Trusted(r, opts.trust, host, port)
+  RETURN (opts.trust = NIL) OR Trusted(r, opts.trust)
 END Open;
 
 (* Reads the header, and the body that came with it, into r.head, and

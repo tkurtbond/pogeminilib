@@ -86,7 +86,7 @@ VAR
 
   (* A changed key refused: what "trust" would trust. *)
   refused: BOOLEAN;
-  refusedHost: ARRAY 256 OF CHAR;
+  refusedHost: ARRAY GeminiPunycode.MaxHost + 2 OF CHAR;
   refusedPort: LONGINT;
   refusedHash: ARRAY 128 OF CHAR;
   refusedNotAfter: HUGEINT;
@@ -400,14 +400,10 @@ BEGIN
   IF ~ok THEN
     Say2("failed: ", r.error.text);
     IF (r.error.kind = GeminiResponses.changed) & (r.keyHash # "") THEN
-      (* The store knows the host by its ASCII name, as it went to the
-         server; Trust is given the same. *)
-      refused := GeminiPunycode.ToAscii(r.url.host, refusedHost, why);
-      IF refused THEN
-        u := r.url; refusedPort := GeminiUrls.Port(u);
-        COPY(r.keyHash, refusedHash); refusedNotAfter := r.notAfter; COPY(t, refusedLink);
-        Say2("its key now: ", r.keyHash); Say('"trust" trusts it from now on')
-      END
+      (* Trust is given the server as the store knows it. *)
+      refused := TRUE; COPY(r.host, refusedHost); refusedPort := r.port;
+      COPY(r.keyHash, refusedHash); refusedNotAfter := r.notAfter; COPY(t, refusedLink);
+      Say2("its key now: ", r.keyHash); Say('"trust" trusts it from now on')
     END;
     r.Close; RETURN
   END;
