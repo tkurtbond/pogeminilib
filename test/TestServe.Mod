@@ -10,7 +10,13 @@ MODULE TestServe; (* GeminiServer, in GeminiServe, against a raw client *)
    a third and must be dropped at the server's deadline. Then the
    server, told how many connections to serve, must exit 0 with a line
    in its log, by its Logger, for each. Once more with an RSA key
-   pair. First, in this process, a server that listens and closes. *)
+   pair. First, in this process, a server that listens and closes.
+   Last, gmni (BearSSL; $GMNI or gmni on PATH, skipped without one),
+   with an RSA client certificate over IPv4, trusting the server
+   (-j always), then an EC one over IPv6, requiring that trust (-j
+   fail): each page and log line must have its certificate's hash.
+   gmni gets an absolute XDG_DATA_HOME under build/: on a relative one
+   it never ends, and without one it would use the user's own. *)
 
 IMPORT Out, Platform, Tasks, Sockets, SocketTasks, Tls, Check, Child,
   RawClient, GeminiIdentities, GeminiServer;
@@ -272,6 +278,54 @@ BEGIN
   Check.Check(TRUE, "Close: again, nothing")
 END Close;
 
+(* Runs gmni with opts, for home: it must exit 0, with the page naming
+   the certificate whose hash is h. *)
+PROCEDURE Gmni1(gmni, opts, h, label: ARRAY OF CHAR);
+  VAR c: Child.Child; cmd: ARRAY 1024 OF CHAR; got: ARRAY 65536 OF CHAR;
+    line: ARRAY 256 OF CHAR; n: LONGINT; s: INTEGER; ok: BOOLEAN;
+BEGIN
+  cmd := 'XDG_DATA_HOME="$PWD/../build/gmni-data" exec '; Append(cmd, gmni);
+  Append(cmd, " "); Append(cmd, opts); Append(cmd, " -i "); Append(cmd, home);
+  line := "Your client certificate: "; Append(line, h);
+  IF Child.Spawn(cmd, "", 0, c) THEN s := Child.Wait(c, got, n) ELSE s := -1 END;
+  ok := (s = 0) & Check.Contains(got, "20 text/gemini") & Check.Contains(got, line);
+  Check.Check(ok, label);
+  IF ~ok THEN Out.String("  exit "); Out.Int(s, 0); Out.String(", output: "); Out.String(got); Out.Ln END
+END Gmni1;
+
+(* gmni against the server, if there is one. *)
+PROCEDURE Gmni;
+  CONST rsa = "-E ../build/certs/client1-rsa.crt:../build/certs/client1-rsa.key";
+    ec = "-E ../build/certs/client2-ec.crt:../build/certs/client2-ec.key";
+  VAR c: Child.Child; gmni: ARRAY 512 OF CHAR; log: ARRAY 4096 OF CHAR;
+    h1, h2: ARRAY 128 OF CHAR; line: ARRAY 256 OF CHAR; opts: ARRAY 256 OF CHAR;
+    port: INTEGER; n: LONGINT;
+BEGIN
+  IF ~Child.Spawn('for n in "$GMNI" gmni; do command -v "$n" && exit 0; done; exit 1', "", 0, c)
+    OR (Child.Wait(c, gmni, n) # 0) THEN
+    Check.Skip("gmni: not found (on PATH, or set GMNI)"); RETURN
+  END;
+  WHILE (n > 0) & (gmni[n - 1] <= " ") DO DEC(n) END; gmni[n] := 0X;
+  Out.String("# gmni: "); Out.String(gmni); Out.Ln;
+  Hash("client1-rsa", h1); Hash("client2-ec", h2);
+  IF ~Child.Spawn("rm -rf ../build/gmni-data", "", 0, c) OR (Child.Wait(c, log, n) # 0) THEN END;
+  IF ~Start("ec", 2, c, port) THEN
+    Check.Check(FALSE, "gmni: the server starts");
+    IF Child.Wait(c, log, n) # 0 THEN END; Out.String(log); Out.Ln;
+    RETURN
+  END;
+  opts := "-4 -j always "; Append(opts, rsa);
+  Gmni1(gmni, opts, h1, "gmni (BearSSL), RSA client certificate, 127.0.0.1: the page names it");
+  opts := "-6 -j fail "; Append(opts, ec);
+  Gmni1(gmni, opts, h2, "gmni (BearSSL), EC client certificate, ::1: the server it trusted; the page names it");
+  Check.Check(Child.Wait(c, log, n) = 0, "gmni: the server exits 0");
+  line := "127.0.0.1 20 "; Append(line, home); Append(line, " "); Append(line, h1);
+  Check.Check(Lines(log, line) = 1, "log: gmni's RSA client certificate");
+  line := "::1 20 "; Append(line, home); Append(line, " "); Append(line, h2);
+  Check.Check(Lines(log, line) = 1, "log: gmni's EC client certificate");
+  Out.String(log)
+END Gmni;
+
 PROCEDURE Main;
   VAR c: Child.Child; t: Test; rsa: Rsa; port: INTEGER; i: LONGINT;
     log: ARRAY 65536 OF CHAR; line: ARRAY 1200 OF CHAR;
@@ -315,6 +369,7 @@ BEGIN
     NEW(rsa); rsa.port := port; Tasks.Start(rsa, StackSize); Tasks.Join(rsa);
     Check.Check(Child.Wait(c, log, i) = 0, "RSA: the server exits 0")
   END;
+  Gmni;
   Check.Summary
 END Main;
 

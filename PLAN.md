@@ -1351,6 +1351,19 @@ alerik, artos, yishana, jherek and cymoril (985 ok, no FAIL, skip or
 assertion), with pogemini's `GemCert` on `Ensure` passing its own tests
 there too.
 
+### gmni against GeminiServe [done]
+
+2026-11-19: TestServe ends with gmni (BearSSL, `~/local/rndbin/gmni`,
+`$GMNI`; skipped, saying so, without one), the first client in these
+tests on a TLS stack other than libtls: an RSA client certificate over
+IPv4, trusting the server (`-j always`), then an EC one over IPv6,
+requiring that trust (`-j fail`); each page and log line must carry the
+certificate's hash. gmni is given an absolute `XDG_DATA_HOME` under
+`build/` (on a relative one it segfaults; without one it would read the
+user's known hosts) and `localhost` with `-4`/`-6`, since it can't
+connect to a bracketed IPv6 address (polibtls's PLAN.md, "gmni, on
+BearSSL").
+
 ## Open questions
 
 - ~~**Should pogeminilib include the server engine**?~~ Yes (the user,

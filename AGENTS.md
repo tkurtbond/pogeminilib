@@ -70,7 +70,7 @@ PLAN.md, "The peer's public key" and "A certificate's validity").
 | pogemini | `~/Repos/Oberon/pogemini`: `src/GemRequest.Mod`, `src/GemServer.Mod`, `test/` |
 | poc | `/usr/bin/poc`; its source `~/Repos/Oberon/Peaseblossom` (`doc/users-guide.md`, section 12 for `Tasks`; `doc/reference-guide.md`; `rtl/llvm/Tasks.Mod`, `rtl/llvm/StopRequests.Mod`) |
 | Oberon-2 report | `~/Reference/Computer/Languages/Oberon/Oberon2.pdf` |
-| Clients and servers to test against | pogemini (installed, if there); `openssl s_client`; gemget (`~/go/bin/gemget`); `gnutls-cli`; OpenBSD's `nc` as `/usr/bin/netcat`. polibtls's `test/TestGemini.Mod` shows how to drive each |
+| Clients and servers to test against | pogemini (installed, if there); `openssl s_client`; gemget (`~/go/bin/gemget`); `gnutls-cli`; OpenBSD's `nc` as `/usr/bin/netcat`; gmni (BearSSL, `~/local/rndbin/gmni`, run by `TestServe` with client certificates; give it an absolute `XDG_DATA_HOME`). polibtls's `test/TestGemini.Mod` shows how to drive each |
 
 ## Build
 
@@ -152,7 +152,7 @@ tools already there (checked 2026-11-18):
   doc` there.
 
 `ssh <host>` is the user's account, `ssh root@<host>` root's. Neither
-has gemget or valgrind, and only terhali has pogemini (in
+has gemget, gmni or valgrind, and only terhali has pogemini (in
 `~/.local/bin`), so tests needing them skip where they're missing.
 Phases 1 to 4's `gmake test` passed on both (2026-11-18). A halt
 test's `assertion failed (n)` is expected; count only the others.
