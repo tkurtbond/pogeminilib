@@ -1037,7 +1037,7 @@ and found:
   shows the server's key's hash, not the certificate's, when nothing
   is checked, as that is what is pinned.
 
-### Phase 6: an example browser
+### Phase 6: an example browser [done]
 
 `examples/GeminiBrowse.Mod`: a line-mode browser (numbered links, input
 for 1x, back, the trust store), showing how the modules fit together,
@@ -1079,6 +1079,12 @@ What it found:
 - **`-identities` for a directory not there**: `OpenScopes` and
   `List` both take a missing file or directory for none yet, so the
   browser checks with `UnixFiles.OpenDirectory` itself.
+- **The BSDs**: `gmake test` passed on FreeBSD, NetBSD and OpenBSD,
+  amd64 and i386 (alerik, artos, yishana, jherek, cymoril), 2026-11-18:
+  876 ok each, no FAIL, no core files, and the only `assertion failed`
+  the 13 halt tests'. 6 fewer than Linux since pogemini isn't installed
+  there and its checks are skipped. The dependencies from their
+  committed heads (polibtls d935372, pounix 5bc0c24).
 - **memcheck, open, to investigate later** (the user, 2026-11-18:
   leave it open for now): `make valgrind` is clean, `TestBrowse` with it,
   but that doesn't follow the browser, its child. Run directly under

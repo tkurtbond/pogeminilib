@@ -36,8 +36,11 @@ and `GeminiTextWriter`, with `TestText` and halt tests 120..123) and 3
 `GeminiFetch`, with `TestFetch`, `TestClient`, halt tests 127 and 128,
 and the examples `GeminiGet` and `GeminiFetchAll`) and 5 (`GeminiTrust`,
 `FetchFollowing` and `GeminiIdentities`, with `TestTrust`,
-`TestRedirects`, `TestIdentities` and halt test 129) are done; Phase 6
-(an example browser) is next. The questions in PLAN.md
+`TestRedirects`, `TestIdentities` and halt test 129) and 6 (the
+example browser `GeminiBrowse`, with `TestBrowse`, `Scopes.Covering`,
+and pounix's `UnixTerminals` for status 11; 2 memcheck errors in the
+browser left open, to investigate later) are done; Phase 7 (the BSDs)
+is next. The questions in PLAN.md
 are all decided (struck through there, each recorded where it
 applies). The changes Phase 5 needed in another repository are made:
 polibtls's `Connection.PeerKeyHash` and its `TlsCerts` module, in
