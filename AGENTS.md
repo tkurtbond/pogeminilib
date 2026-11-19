@@ -55,6 +55,11 @@ polibtls's `Connection.PeerKeyHash` and its `TlsCerts` module, in
 Oberon, with `TlsCerts.CertHash` and `TlsCerts.Validity` for an
 identity's hash and expiry from its file, installed 2026-11-18 (its
 PLAN.md, "The peer's public key" and "A certificate's validity").
+Since 2026-11-19 posockets resolves names in a thread (its Phase 11),
+so `GeminiClient`'s lookups hold up no other task and both clients'
+deadlines count the lookup, with no change here but docs and tests
+(`ClientCases.Lookups`, `TestClient`'s `SlowLookup`, through posockets'
+test hook `Sockets.-set-resolve-delay`; PLAN.md, "Slow name lookups").
 
 ## Reference material
 

@@ -276,7 +276,8 @@ END Header.
 ### A fetch, and trust on first use: `GeminiFetch`, `GeminiResponses`, `GeminiTrust`
 
 A fetch blocks until its header has come, or its deadline
-(`opts.deadline`, ten seconds unless set) has passed. The server's key
+(`opts.deadline`, ten seconds unless set, and counting the lookup of
+the host's name) has passed. The server's key
 is checked against the known hosts before the request is sent, so a
 URL and its query never reach a server that isn't trusted.
 

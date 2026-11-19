@@ -2,8 +2,9 @@ MODULE GeminiClient; (* fetching gemini URLs in poc's Tasks *)
 
 (* A fetch in a task: while it waits for the network, the program's
    other tasks run, so a program fetches several URLs at once, one task
-   each, and a server that stalls holds up only its own. Each wait is
-   cut short at the fetch's deadline (Options.deadline).
+   each, and a server that stalls holds up only its own, as does a
+   name server slow to answer for its host. Each wait is cut short at
+   the fetch's deadline (Options.deadline).
 
    The work is GeminiResponses', which GeminiFetch shares: this module
    gives it a Waiter that waits through Tasks (SocketTasks.Connect,

@@ -4,11 +4,11 @@
 
 What GeminiClient (in tasks) and GeminiFetch (blocking) share: a request's Options, the Response read through it, and its Error, and every step of a fetch but the waiting, so the two can't drift (PLAN.md, "The client"). A program uses one of those two modules to fetch, and this one for the types; it calls Fetch here only with a Waiter of its own.
 
-A fetch: the URL is parsed and its request line made (GeminiUrls); a connection is made to its host and port within the deadline; TLS with SNI for a host name (libtls sends none for an IP address, as the specification says), the server's certificate checked as the options say, before the request is sent, so a URL and its query never reach a server the program doesn't trust; the request sent; the header read and parsed (GeminiHeaders). A success's body is then the program's to read, as a stream (Read) or whole (ReadAll); any other response has no body, so it is read to its end at once.
+A fetch: the URL is parsed and its request line made (GeminiUrls); its host's name is looked up and a connection made to its port, both within the deadline; TLS with SNI for a host name (libtls sends none for an IP address, as the specification says), the server's certificate checked as the options say, before the request is sent, so a URL and its query never reach a server the program doesn't trust; the request sent; the header read and parsed (GeminiHeaders). A success's body is then the program's to read, as a stream (Read) or whole (ReadAll); any other response has no body, so it is read to its end at once.
 
 A response is complete only if the server ended it with TLS close_notify: an end without one may be an attacker cutting it short (P "Responses", "Closing connections"). A body cut short is an error, kind truncated, and what came before it has been read.
 
-Every socket is non-blocking, and every TLS call is made non-blocking; where one would block, the Waiter waits until the socket is ready or the deadline passes. That is the only difference between the two APIs: GeminiClient's waits through Tasks, so other tasks run meanwhile, and GeminiFetch's in the kernel (posockets' Sockets.Await).
+Every socket is non-blocking, and every TLS call is made non-blocking; where one would block, the Waiter waits until the socket is ready or the deadline passes. That is the only difference between the two APIs: GeminiClient's waits through Tasks, so other tasks run meanwhile, and GeminiFetch's in the kernel (posockets' Sockets.Await). A name lookup is waited for the same way: posockets runs getaddrinfo in a thread of its own (SocketTasks.Connect, Sockets.ConnectWithin), so a slow name server holds up neither other tasks nor the deadline.
 
 Outside data never halts: a server's response, a bad URL, a key file that won't load come back as FALSE and an Error. A program's mistakes halt (PLAN.md, "Halt codes"). Fetch ignores SIGPIPE for the whole program (Sockets.IgnoreBrokenPipe), since a server that goes away while the request is written would otherwise end it.
 
@@ -36,7 +36,7 @@ MaxRedirects* = 5; (* followed at most, by the specification *)
 ```
 
 ```oberon
-DefaultDeadline* = 10000;   (* ms, from connecting to close_notify *)
+DefaultDeadline* = 10000;   (* ms, from the name lookup to close_notify *)
 MaxPath* = 1023;            (* a key, certificate or CA file's name at most *)
 ```
 
@@ -64,7 +64,7 @@ Options* = RECORD
 END;
 ```
 
-A request's options; InitOptions gives the defaults. deadline: ms for everything from connecting to the response's end (close_notify), 0 for none; DefaultDeadline by default. certFile, keyFile: a client certificate and its key, PEM files, "" for none (both or neither). caFile: CA certificates, PEM, that must have signed the server's, which must also name the URL's host; "" to check nothing, the usual choice, with trust. trust: the store of known servers whose Check is asked about the server's key after the handshake and before the request is sent (GeminiTrust); NIL, the default, to ask nothing. maxBody: the most bytes of body accepted, 0 for no limit, the default: a program that reads a stream needs none.
+A request's options; InitOptions gives the defaults. deadline: ms for everything from the host's name lookup to the response's end (close_notify), 0 for none; DefaultDeadline by default. certFile, keyFile: a client certificate and its key, PEM files, "" for none (both or neither). caFile: CA certificates, PEM, that must have signed the server's, which must also name the URL's host; "" to check nothing, the usual choice, with trust. trust: the store of known servers whose Check is asked about the server's key after the handshake and before the request is sent (GeminiTrust); NIL, the default, to ask nothing. maxBody: the most bytes of body accepted, 0 for no limit, the default: a program that reads a stream needs none.
 
 ```oberon
 Waiter* = POINTER TO WaiterDesc;

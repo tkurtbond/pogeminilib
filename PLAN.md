@@ -1364,6 +1364,28 @@ user's known hosts) and `localhost` with `-4`/`-6`, since it can't
 connect to a bracketed IPv6 address (polibtls's PLAN.md, "gmni, on
 BearSSL").
 
+### Slow name lookups [done]
+
+Until 2026-11-19 posockets resolved names with a blocking
+`getaddrinfo`, so a fetch in `GeminiClient` held up every task while a
+name server answered, and neither client's deadline counted the lookup.
+posockets' Phase 11 runs each lookup in a C thread of its own, waited
+for through `Tasks` (`SocketTasks.Connect`) or `poll`
+(`Sockets.ConnectWithin`), within the time limit, so both clients get
+it with no code change here, only the docs of the deadline and these
+tests, which use posockets' test hook `Sockets.-set-resolve-delay` (a
+wait before `getaddrinfo`, in the lookup's thread) to make a lookup of
+`localhost` slow without a name server:
+
+- `ClientCases.Lookups`, for both clients: with a 300 ms lookup, a
+  100 ms deadline times out near 100 ms, the text naming the lookup
+  ("resolve localhost port ..."), and a 5 s one fetches whole.
+- `TestClient`'s `SlowLookup`: with a 1 s lookup, a ticker task
+  sleeping 5 ms at a time never goes 500 ms between ticks while the
+  fetch runs, and the fetch succeeds.
+
+If posockets renames or drops the hook, these tests fail to link.
+
 ## Open questions
 
 - ~~**Should pogeminilib include the server engine**?~~ Yes (the user,

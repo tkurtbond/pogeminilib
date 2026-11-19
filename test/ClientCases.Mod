@@ -6,10 +6,11 @@ MODULE ClientCases; (* the checks GeminiClient and GeminiFetch must both pass *)
    and IPv6, with and without SNI and a client certificate, the CA file
    verifying or not, the body as a stream and whole, its limit, closing
    early, and each fault the server makes, each failure the network
-   gives, and each URL that can't be fetched. Run from test/, with the
-   certificates in ../build/certs. *)
+   gives, each URL that can't be fetched, and a slow name lookup, which
+   the deadline covers. Run from test/, with the certificates in
+   ../build/certs. *)
 
-IMPORT Sockets, Check, GeminiResponses;
+IMPORT SYSTEM, Sockets, Check, GeminiResponses;
 
 CONST
   Certs = "../build/certs/";
@@ -22,6 +23,16 @@ TYPE
 VAR
   fetch: Fetcher;
   port: INTEGER;
+
+(* posockets' hook for its own tests (its PLAN.md, Phase 11): every name
+   lookup started after it waits ms in its thread before getaddrinfo,
+   so a lookup of localhost is slow enough to time out, with no name
+   server. *)
+PROCEDURE ["C", "Sockets.-set-resolve-delay"] CSetResolveDelay(ms: SYSTEM.INT32);
+
+PROCEDURE SetResolveDelay*(ms: INTEGER);
+BEGIN CSetResolveDelay(ms)
+END SetResolveDelay;
 
 (* s := s + t *)
 PROCEDURE Append*(VAR s: ARRAY OF CHAR; t-: ARRAY OF CHAR);
@@ -339,6 +350,35 @@ BEGIN
   IF n > 0 THEN Sockets.Close(ls[0]) END
 END Network;
 
+(* A slow name lookup (posockets resolves names in a thread since its
+   Phase 11): the deadline covers it, and a fetch that has time for it
+   succeeds. *)
+PROCEDURE Lookups;
+  CONST Delay = 300;
+  VAR o: GeminiResponses.Options; r: GeminiResponses.Response; ok: BOOLEAN;
+    link: ARRAY 256 OF CHAR; t0, el, len: LONGINT; body: GeminiResponses.Chars;
+BEGIN
+  GeminiResponses.InitOptions(o);
+  SetResolveDelay(Delay);
+  Local("/", link);
+  o.deadline := 100;
+  t0 := Sockets.Now();
+  ok := ~fetch(link, o, r) & (r.error.kind = GeminiResponses.timedOut);
+  el := Sockets.Now() - t0;
+  Check.Check(ok & (el >= 95) & (el < 100 + Slack)
+    & Check.Contains(r.error.text, "resolve localhost port"),
+    "a lookup slower than the deadline: timedOut at the deadline, naming the lookup");
+  o.deadline := 5000;
+  t0 := Sockets.Now();
+  ok := fetch(link, o, r) & (r.status = 20) & r.ReadAll(body, len) & r.complete;
+  el := Sockets.Now() - t0;
+  IF r # NIL THEN r.Close END;
+  Check.Check(ok & (el >= Delay - 5), "a slow lookup within the deadline: fetched");
+  SetResolveDelay(0)
+  (* The abandoned lookup's thread was done before the second fetch's,
+     started later with the same delay, so none is left running. *)
+END Lookups;
+
 PROCEDURE Urls;
   VAR o: GeminiResponses.Options; r: GeminiResponses.Response; ok: BOOLEAN;
 BEGIN
@@ -359,7 +399,7 @@ END Urls;
 PROCEDURE Run*(f: Fetcher; serverPort: INTEGER);
 BEGIN
   fetch := f; port := serverPort;
-  Basics; Bodies; Statuses; Faults; Network; Urls
+  Basics; Bodies; Statuses; Faults; Network; Lookups; Urls
 END Run;
 
 END ClientCases.

@@ -3,7 +3,8 @@ MODULE TestClient; (* GeminiClient, in tasks, against test/TestServer and pogemi
 (* PLAN.md, Phase 4: ClientCases with GeminiClient.Fetch, in a task;
    then several fetches at once, one of them stalled, to see that the
    stalled one holds up none of the others; then, if pogemini is
-   installed, a few fetches from it, as a real server. And the example
+   installed, a few fetches from it, as a real server; and a fetch
+   whose name lookup is slow, while another task runs. And the example
    built on it, examples/GeminiFetchAll.Mod, run as a child. *)
 
 IMPORT Sockets, Tasks, Check, Child, Server, ClientCases, GeminiResponses, GeminiClient;
@@ -20,6 +21,12 @@ CONST
 TYPE
   Cases = POINTER TO RECORD (Tasks.TaskDesc) port: INTEGER END;
 
+  (* Ticks every 5 ms until stop, keeping the longest time between ticks *)
+  Ticker = POINTER TO RECORD (Tasks.TaskDesc)
+    stop: BOOLEAN;
+    started, last, maxGap: LONGINT
+  END;
+
   (* One fetch of link, read whole: ok, its length, and when it ended *)
   Fetch = POINTER TO RECORD (Tasks.TaskDesc)
     link: ARRAY 256 OF CHAR;
@@ -35,6 +42,18 @@ VAR
 
 PROCEDURE (t: Cases) Run*;
 BEGIN ClientCases.Run(GeminiClient.Fetch, t.port)
+END Run;
+
+PROCEDURE (t: Ticker) Run*;
+  VAR now: LONGINT;
+BEGIN
+  t.started := Sockets.Now(); t.last := t.started;
+  WHILE ~t.stop DO
+    Tasks.Sleep(5);
+    now := Sockets.Now();
+    IF now - t.last > t.maxGap THEN t.maxGap := now - t.last END;
+    t.last := now
+  END
 END Run;
 
 PROCEDURE (f: Fetch) Run*;
@@ -73,6 +92,24 @@ BEGIN
     & (stalled.ended - t0 >= StallFor - 5) & (stalled.ended - t0 <= StallFor + Slack),
     "and the stalled one times out at its own deadline")
 END Concurrency;
+
+(* A fetch from localhost whose lookup takes LookupDelay ms (posockets'
+   test hook, through ClientCases): a ticker task ticking every 5 ms
+   meanwhile never waits as long as the lookup, as it would if the
+   lookup held up every task. *)
+PROCEDURE SlowLookup;
+  CONST LookupDelay = 1000; MaxGap = 500;
+  VAR t: Ticker; f: Fetch;
+BEGIN
+  NEW(t); t.last := Sockets.Now(); Tasks.Start(t, 65536);
+  ClientCases.SetResolveDelay(LookupDelay);
+  f := Start("/", "localhost", port, 10000); Tasks.Join(f);
+  ClientCases.SetResolveDelay(0);
+  t.stop := TRUE; Tasks.Join(t);
+  Check.Check(f.ok & (f.r.status = 20) & (f.ended - t.started >= LookupDelay - 5),
+    "a fetch whose lookup takes 1 s: fetched");
+  Check.Check(t.maxGap < MaxGap, "another task ran all the while (no gap of 500 ms)")
+END SlowLookup;
 
 (* Runs command in the shell, for its status *)
 PROCEDURE Shell(command: ARRAY OF CHAR): INTEGER;
@@ -148,6 +185,7 @@ BEGIN
   IF port > 0 THEN
     NEW(t); t.port := port; Tasks.Start(t, StackSize); Tasks.Join(t);
     Concurrency;
+    SlowLookup;
     Example;
     Server.Stop
   END;

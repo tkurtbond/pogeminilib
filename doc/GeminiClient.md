@@ -2,7 +2,7 @@
 
 <!-- Made by doc/mkref.py from GeminiClient.Mod; edit the source, then make doc. -->
 
-A fetch in a task: while it waits for the network, the program's other tasks run, so a program fetches several URLs at once, one task each, and a server that stalls holds up only its own. Each wait is cut short at the fetch's deadline (Options.deadline).
+A fetch in a task: while it waits for the network, the program's other tasks run, so a program fetches several URLs at once, one task each, and a server that stalls holds up only its own, as does a name server slow to answer for its host. Each wait is cut short at the fetch's deadline (Options.deadline).
 
 The work is GeminiResponses', which GeminiFetch shares: this module gives it a Waiter that waits through Tasks (SocketTasks.Connect, Tasks.AwaitReadableFor and AwaitWritableFor). Its types are GeminiResponses': Options, Response and Error. Fetch must be called from a task, whose stack has room for it: stackSize, or more for the task's own needs.
 
