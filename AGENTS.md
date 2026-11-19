@@ -85,7 +85,10 @@ PLAN.md, "The peer's public key" and "A certificate's validity").
   `POCLIBDIR` (`~/.local/lib/poc`) and were built by the poc in use.
 - `make install` and `make uninstall` by `poc -install-library`, both
   variants; install refuses while `LIBMODS` is empty. `make doc`
-  writes `doc/<Module>.md` from the source's comments.
+  writes `doc/<Module>.md` from the source's comments, and `make
+  readme` (which `make doc` runs) README.md's programs and halt codes
+  from `examples/readme/` and PLAN.md, "Halt codes" (`doc/mkreadme.awk`):
+  edit those, never the copies in README.md, which `make test` checks.
 - `.NOTPARALLEL`, since poc writes every module's files into one
   `build/`; `POC_LIBRARY_PATH` unexported.
 

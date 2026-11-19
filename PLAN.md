@@ -1242,6 +1242,21 @@ run, and
 after uninstall nothing of pogeminilib left and the four dependencies
 untouched.
 
+**Then (2026-11-19), so the README can't go stale:** its programs are
+files, `examples/readme/<name>.Mod`, which `make` builds into
+`build/readme` and `test/TestReadme` runs as the README shows, checking
+the same output (with this run's port and hashes where they vary):
+`Hello` takes a port, 0 for the kernel's choice, and says it in a line
+`port n`, so the test runs it beside anything else, and restarts it on
+that port with another key for `Get`'s refusal. The README's code
+blocks and halt-code table are made from those files and the table
+above by `doc/mkreadme.awk` (awk, since terhali has no python3): `make
+readme`, which `make doc` runs too, rewrites them, and `make test`
+fails first if they differ. Running them found that `Get` and
+`Identity` printed an empty line after a body, which already ends its
+lines, that the README didn't show: now a newline follows only what
+the program writes itself.
+
 ## Open questions
 
 - ~~**Should pogeminilib include the server engine**?~~ Yes (the user,

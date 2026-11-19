@@ -78,7 +78,7 @@ LIBPATH := -library-path $(LIBDIR) -library-path $(POCLIBDIR)
 LIBSRC := $(LIBMODS:%=src/%.Mod)
 LIBSTAMP := $(if $(LIBMODS),$(LIBDIR)/$(LIBRARY)-OC.stamp)
 # Test programs (test/<name>.Mod, each a main module), run from test/.
-TESTS := TestCheck TestPunycode TestUrls TestText TestHeaders TestTrust TestRedirects TestIdentities TestFetch TestClient TestBrowse TestServe TestRun
+TESTS := TestCheck TestPunycode TestUrls TestText TestHeaders TestTrust TestRedirects TestIdentities TestFetch TestClient TestBrowse TestServe TestRun TestReadme
 # The client's tests: their shared modules, the server they run, and its
 # certificates.
 CLIENTTESTS := TestTrust TestRedirects TestIdentities TestFetch TestClient TestBrowse
@@ -100,17 +100,23 @@ ASSERTSTATUS := 10
 # Example programs (examples/<name>.Mod), not installed; the tests
 # run them.
 EXAMPLES := GeminiGet GeminiFetchAll GeminiBrowse GeminiServe
+# README.md's programs (examples/readme/<name>.Mod), which it shows
+# whole (doc/mkreadme.awk) and TestReadme runs. Built into a directory
+# of their own, since their names are short and common.
+READMEPROGS := Links Outline Index Header Get Both Identity Hello
+READMEDIR := $(BUILD)/readme
 
 TESTBINS := $(TESTS:%=$(BUILD)/%)
 EXAMPLEBINS := $(EXAMPLES:%=$(BUILD)/%)
+READMEBINS := $(READMEPROGS:%=$(READMEDIR)/%)
 HALTBINS := $(foreach h,$(HALTTESTS),$(BUILD)/$(firstword $(subst :, ,$(h))))
 
-.PHONY: all deps tests test valgrind clean install uninstall doc
+.PHONY: all deps tests test valgrind clean install uninstall doc readme
 .NOTPARALLEL:
 
 all: deps tests
 
-tests: $(EXAMPLEBINS) $(TESTBINS) $(HALTBINS) $(BUILD)/TestServer
+tests: $(EXAMPLEBINS) $(READMEBINS) $(TESTBINS) $(HALTBINS) $(BUILD)/TestServer
 
 # Each library in DEPLIBS must be installed in $(POCLIBDIR), by this poc.
 deps:
@@ -140,6 +146,12 @@ $(SERVERTESTS:%=$(BUILD)/%): $(SERVERDEPS)
 $(EXAMPLEBINS): $(BUILD)/%: examples/%.Mod $(LIBSTAMP) | deps $(BUILD)
 	$(POC) $(POCFLAGS) $(LIBPATH) -output-dir $(BUILD) -o $@ $<
 
+$(READMEBINS): $(READMEDIR)/%: examples/readme/%.Mod $(LIBSTAMP) | deps $(BUILD)
+	mkdir -p $(READMEDIR)
+	$(POC) $(POCFLAGS) $(LIBPATH) -output-dir $(READMEDIR) -o $@ $<
+
+$(BUILD)/TestReadme: $(READMEBINS) $(BUILD)/GeminiServe $(CERTS)/.stamp
+
 # The misbehaving server the client's tests run (test/TestServer.Mod).
 $(BUILD)/TestServer: test/TestServer.Mod $(LIBSTAMP) | deps $(BUILD)
 	$(POC) $(POCFLAGS) $(LIBPATH) -output-dir $(BUILD) -o $@ $<
@@ -162,7 +174,13 @@ $(BUILD)/HaltServerHeader $(BUILD)/HaltServerWrite $(BUILD)/HaltServerNoHeader: 
 # code on standard error. Standard input is /dev/null. A test makes its
 # files under build/test-<name>, afresh, and removes them at its end.
 test: all
-	@status=0; for t in $(TESTS); do \
+	@status=0; echo "== README.md"; \
+	awk -f doc/mkreadme.awk README.md > $(BUILD)/README.md.check; \
+	if cmp -s $(BUILD)/README.md.check README.md; then \
+	  echo "ok   - README.md's programs and halt codes are examples/readme's and PLAN.md's"; \
+	else echo "FAIL - README.md's programs or halt codes differ from examples/readme's or PLAN.md's: make readme"; status=1; fi; \
+	rm -f $(BUILD)/README.md.check; \
+	for t in $(TESTS); do \
 	  echo "== $$t"; (cd test && ../$(BUILD)/$$t < /dev/null) || status=1; \
 	done; \
 	for h in $(HALTTESTS); do \
@@ -234,7 +252,14 @@ uninstall:
 # so a reader needs no build.
 DOCS := $(patsubst %,doc/%.md,$(LIBMODS))
 
-doc: $(DOCS)
+doc: $(DOCS) readme
+
+# README.md's programs and halt codes, from examples/readme and PLAN.md
+# (doc/mkreadme.awk); rewritten only if they changed.
+readme: | $(BUILD)
+	awk -f doc/mkreadme.awk README.md > $(BUILD)/README.md.new
+	if cmp -s $(BUILD)/README.md.new README.md; then rm $(BUILD)/README.md.new; \
+	else mv $(BUILD)/README.md.new README.md; echo "README.md remade"; fi
 
 doc/%.md: src/%.Mod doc/mkref.py
 	python3 doc/mkref.py $< > $@

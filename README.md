@@ -79,7 +79,8 @@ identities and input; and `GeminiServe`, a small server.
 ## Examples
 
 Each of these is a whole program, built against the installed library
-as above and run; between them they use every module.
+as above and run; between them they use every module. Their source is
+in `examples/readme/`, and `make test` runs each as shown here.
 
 ### URLs and host names: `GeminiUrls`, `GeminiPunycode`
 
@@ -87,6 +88,7 @@ Links in a page are resolved against the page's URL, and the request
 line is what goes to the server: ASCII, with an internationalised host
 as punycode.
 
+<!-- program examples/readme/Links.Mod -->
 ```oberon
 MODULE Links; (* resolves links against a page's URL, as a client does *)
 
@@ -116,6 +118,7 @@ BEGIN
   END
 END Links.
 ```
+<!-- end program -->
 
     $ Links 'gemini://Bücher.example/a/b/c.gmi?q#f' ../x.gmi //other.example:1966/ gemini://u@h/
     gemini://xn--bcher-kva.example/a/x.gmi (host bücher.example)
@@ -133,6 +136,7 @@ and gives its lines in memory fixed when it is made: a page of any
 length, or a line of any length, needs no more. A program with the
 whole page in memory calls `GeminiText.Parse` instead.
 
+<!-- program examples/readme/Outline.Mod -->
 ```oberon
 MODULE Outline; (* prints a gemtext file's headings and links *)
 
@@ -166,6 +170,7 @@ BEGIN
   END
 END Outline.
 ```
+<!-- end program -->
 
     $ cat t.gmi
     # Title
@@ -188,6 +193,7 @@ A writer refuses what would read back as another kind of line, or as
 something else, rather than writing it; `GeminiServer.NewWriter` gives
 one that writes to a response.
 
+<!-- program examples/readme/Index.Mod -->
 ```oberon
 MODULE Index; (* writes index.gmi, a page linking to the files named *)
 
@@ -210,6 +216,7 @@ BEGIN
   IF ok THEN Files.Register(f) ELSE Out.String(why); Out.Ln END
 END Index.
 ```
+<!-- end program -->
 
     $ Index 'a b?.gmi' c:d.gmi notes.gmi && cat index.gmi
     # Index
@@ -223,6 +230,7 @@ A fetch parses the header for the program; this parses one given as
 an argument, to show what it means. A status the specification
 doesn't name is taken as its class's first, as it says to.
 
+<!-- program examples/readme/Header.Mod -->
 ```oberon
 MODULE Header; (* says what a response header means *)
 
@@ -253,6 +261,7 @@ BEGIN
   Out.Ln
 END Header.
 ```
+<!-- end program -->
 
     $ Header '20 text/plain;charset=ISO-8859-1'
     20: success, text/plain in iso-8859-1
@@ -270,6 +279,7 @@ A fetch blocks until its header has come, or its deadline
 is checked against the known hosts before the request is sent, so a
 URL and its query never reach a server that isn't trusted.
 
+<!-- program examples/readme/Get.Mod -->
 ```oberon
 MODULE Get; (* fetches a gemini URL, blocking, trusting its server on first use *)
 
@@ -287,22 +297,22 @@ BEGIN
   ELSE
     opts.trust := hosts;   (* asked before the request is sent *)
     IF ~GeminiFetch.Fetch(url, opts, r) THEN
-      Out.String(r.error.text)   (* a changed key: r.error.kind = changed *)
+      Out.String(r.error.text); Out.Ln   (* a changed key: r.error.kind = changed *)
     ELSE
       Out.Int(r.status, 0); Out.String(" "); Out.String(r.meta); Out.Ln;
       IF r.trust = GeminiTrust.added THEN
         Out.String("first use: "); Out.String(r.keyHash); Out.Ln
       END;
       IF r.status DIV 10 = 2 THEN
-        IF r.ReadAll(body, len) THEN Out.String(body^)
-        ELSE Out.String(r.error.text)   (* cut short, say *)
+        IF r.ReadAll(body, len) THEN Out.String(body^)   (* its own line ends *)
+        ELSE Out.String(r.error.text); Out.Ln   (* cut short, say *)
         END
       END
-    END;
-    Out.Ln
+    END
   END
 END Get.
 ```
+<!-- end program -->
 
     $ Get gemini://localhost/
     20 text/gemini
@@ -326,6 +336,7 @@ buffer's worth of memory. `FetchFollowing` follows redirects.
 The same fetch, in a task: while it waits for the network the
 program's other tasks run, so a slow server holds up only its own.
 
+<!-- program examples/readme/Both.Mod -->
 ```oberon
 MODULE Both; (* fetches two gemini URLs at once, a task each *)
 
@@ -365,6 +376,7 @@ BEGIN
   Show(a); Show(b)
 END Both.
 ```
+<!-- end program -->
 
     $ Both gemini://localhost/ gemini://localhost/x
     gemini://localhost/: 20 text/gemini
@@ -376,6 +388,7 @@ An identity is a certificate and its key in a directory, and the scopes
 file says which is offered for which URL: the one attached to its host
 and port and the longest path above it.
 
+<!-- program examples/readme/Identity.Mod -->
 ```oberon
 MODULE Identity; (* fetches a URL with the identity attached to it, made if need be *)
 
@@ -405,14 +418,14 @@ BEGIN
   ELSE
     Out.String("as "); Out.String(id.name); Out.String(", "); Out.String(id.hash); Out.Ln;
     GeminiResponses.InitOptions(opts); GeminiIdentities.Use(id, opts);
-    IF ~GeminiFetch.Fetch(link, opts, r) THEN Out.String(r.error.text)
-    ELSIF (r.status DIV 10 = 2) & r.ReadAll(body, len) THEN Out.String(body^)
-    ELSE Out.Int(r.status, 0); Out.String(" "); Out.String(r.meta)
-    END;
-    Out.Ln
+    IF ~GeminiFetch.Fetch(link, opts, r) THEN Out.String(r.error.text); Out.Ln
+    ELSIF (r.status DIV 10 = 2) & r.ReadAll(body, len) THEN Out.String(body^)   (* its own line ends *)
+    ELSE Out.Int(r.status, 0); Out.String(" "); Out.String(r.meta); Out.Ln
+    END
   END
 END Identity.
 ```
+<!-- end program -->
 
     $ mkdir ids; Identity gemini://localhost/
     as me, SHA256:d5e88ace82510b0d523adaafc7117b1d6c1c41615ff451254011791a69e245c3
@@ -430,15 +443,21 @@ The engine serves each connection in a task of its own, within a
 deadline, and hands its request to a procedure of the program's,
 which decides what it means: here, `GeminiUrls.CheckRequest`'s path.
 The `Get` and `Both` runs above were against it, with a key pair in
-`server.crt` and `server.key`. SIGINT or SIGTERM stops it cleanly.
+`server.crt` and `server.key`, as `Hello` alone, on port 1965; `Hello
+0` lets the kernel choose a port, and the line `port n` says which.
+SIGINT or SIGTERM stops it cleanly.
 
+<!-- program examples/readme/Hello.Mod -->
 ```oberon
 MODULE Hello; (* a Gemini server: a page at "/", 51 for anything else *)
 
-IMPORT Out, Sockets, Tls, GeminiUrls, GeminiTextWriter, GeminiServer;
+(* Usage: Hello [port], 1965 if not given, 0 for one the kernel chooses *)
+
+IMPORT Args, Out, Sockets, Tls, GeminiUrls, GeminiTextWriter, GeminiServer;
 
 VAR
   c: Tls.Config; ctx: Tls.Context; s: GeminiServer.Server; err: Sockets.Error;
+  port: LONGINT;
 
 PROCEDURE Respond(x: GeminiServer.Exchange);
   VAR r: GeminiUrls.Request; w: GeminiServer.Writer; why: ARRAY 128 OF CHAR; status: INTEGER;
@@ -457,6 +476,7 @@ BEGIN
 END Respond;
 
 BEGIN
+  port := 1965; IF Args.argc > 1 THEN Args.GetInt(1, port) END;
   c := Tls.NewConfig();
   IF ~c.SetKeypairFile("server.crt", "server.key") THEN Out.String(c.error.text^); Out.Ln
   ELSE
@@ -465,13 +485,16 @@ BEGIN
     ELSE
       c.Close;
       s := GeminiServer.New(ctx, Respond);
-      IF ~s.Listen("localhost", 1965, err) THEN Out.String(err.text); Out.Ln
-      ELSE s.Serve(0)   (* until SIGINT or SIGTERM *)
+      IF ~s.Listen("localhost", SHORT(port), err) THEN Out.String(err.text); Out.Ln
+      ELSE
+        Out.String("port "); Out.Int(s.port, 0); Out.Ln;
+        s.Serve(0)   (* until SIGINT or SIGTERM *)
       END
     END
   END
 END Hello.
 ```
+<!-- end program -->
 
 `examples/GeminiServe.Mod` adds a log, an input prompt, and checking
 that the host and port asked for are the server's own.
@@ -492,6 +515,7 @@ though what came before it has been read.
 A programmer's error halts, as an `ASSERT`, so the program exits with
 poc's status 10 and prints `assertion failed (n)`, n one of:
 
+<!-- halt codes: PLAN.md, "Halt codes" -->
 | Code | Module | Meaning |
 |---|---|---|
 | 120 | `GeminiText` | `New`: a buffer smaller than `MinBuffer` |
@@ -508,6 +532,7 @@ poc's status 10 and prints `assertion failed (n)`, n one of:
 | 131 | `GeminiServer` | `Exchange.Write` after a header other than 2x |
 | 132 | `GeminiServer` | a `Responder` returned without a header |
 | 133 | `GeminiServer` | `Server.Serve` before a `Listen` succeeded |
+<!-- end halt codes -->
 
 `GeminiPunycode` and `GeminiUrls` take only outside data, so nothing
 in them halts.
