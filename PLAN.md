@@ -1125,7 +1125,7 @@ exit 0, 884 ok each, Linux's 890 less the 6 that need pogemini
 installed, with the dependencies' HEADs (pounix fd77666, polibtls
 d935372).
 
-### Phase 8: the server engine
+### Phase 8: the server engine [done]
 
 `GeminiServer`, moved from pogemini's `GemServer`, with a log procedure
 in place of its log line, `GeminiHeaders.WriteHeader` for its header,
@@ -1204,6 +1204,19 @@ it halts (133), as before `Listen`. `TestServe` checks, in its own
 process, that a client connects before `Close`, is refused after, and
 that `Close` again does nothing. `make test` passes on Linux (948 ok),
 and memcheck of `TestServe` finds nothing but Tasks' two descriptors.
+
+**The client tests keep `TestServer` (decided 2026-11-19):** they don't
+move to `GeminiServer`. `TestServer` exists to misbehave, and nearly
+all it does for the client's tests is what `GeminiServer` makes
+impossible: a header with no status, none at all, one with no line
+end or a meta over 1024 bytes (`Header` halts, 124 and 125), bytes
+after a 51 or a body with no 2x header (`Write` halts, 131), a close
+without close_notify (`/cut`, `/cuthead`), and a stall past the
+deadline. Only its well-behaved paths (`/page`, `/ask`, `/private`,
+the redirects) could be served so, and splitting it in two would test
+the client against two servers for no gain. `GeminiServer` is tested
+by `TestServe` and `TestRun` through `GeminiServe`, and in use by
+pogemini's tests. With that, Phase 8 is done.
 
 ### Phase 9: documentation and install
 
