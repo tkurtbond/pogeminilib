@@ -55,7 +55,7 @@ CERTS := $(BUILD)/certs
 LIBRARY := pogeminilib
 # The library's modules, in import order (PLAN.md, "Library and module
 # names"); each phase adds its own.
-LIBMODS := GeminiPunycode GeminiUrls GeminiText GeminiTextWriter GeminiStatus GeminiHeaders GeminiResponses GeminiClient GeminiFetch
+LIBMODS := GeminiPunycode GeminiUrls GeminiText GeminiTextWriter GeminiStatus GeminiHeaders GeminiTrust GeminiResponses GeminiIdentities GeminiClient GeminiFetch
 # The installed libraries it needs (PLAN.md, "Foundations").
 DEPLIBS := podatetime posockets polibtls pounix
 
@@ -78,10 +78,10 @@ LIBPATH := -library-path $(LIBDIR) -library-path $(POCLIBDIR)
 LIBSRC := $(LIBMODS:%=src/%.Mod)
 LIBSTAMP := $(if $(LIBMODS),$(LIBDIR)/$(LIBRARY)-OC.stamp)
 # Test programs (test/<name>.Mod, each a main module), run from test/.
-TESTS := TestCheck TestPunycode TestUrls TestText TestHeaders TestFetch TestClient
+TESTS := TestCheck TestPunycode TestUrls TestText TestHeaders TestTrust TestRedirects TestIdentities TestFetch TestClient
 # The client's tests: their shared modules, the server they run, and its
 # certificates.
-CLIENTTESTS := TestFetch TestClient
+CLIENTTESTS := TestTrust TestRedirects TestIdentities TestFetch TestClient
 CLIENTDEPS := test/ClientCases.Mod test/Server.Mod test/Child.Mod $(BUILD)/TestServer $(CERTS)/.stamp
 # Programs that must halt (test/<name>.Mod), as name:Assert-code. poc's
 # ASSERT(x, n) prints "assertion failed (n)" on standard error and exits
@@ -89,7 +89,7 @@ CLIENTDEPS := test/ClientCases.Mod test/Server.Mod test/Child.Mod $(BUILD)/TestS
 # library's (PLAN.md, "Halt codes").
 HALTTESTS := HaltTextBuffer:120 HaltTextRange:121 HaltTextPut:122 HaltTextLevel:123 \
   HaltStatusClass:124 HaltHeaderStatus:124 HaltHeaderLong:125 HaltHeaderControl:125 \
-  HaltHeaderEmpty:125 HaltHeaderRange:126 HaltWaiter:127 HaltReadRange:128
+  HaltHeaderEmpty:125 HaltHeaderRange:126 HaltWaiter:127 HaltReadRange:128 HaltTrustStore:129
 ASSERTSTATUS := 10
 
 # Example programs (examples/<name>.Mod), not installed; the client's

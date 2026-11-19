@@ -35,7 +35,7 @@ MODULE GeminiResponses; (* a request made and its response read, waiting through
    the whole program (Sockets.IgnoreBrokenPipe), since a server that
    goes away while the request is written would otherwise end it. *)
 
-IMPORT Sockets, Tls, GeminiPunycode, GeminiUrls, GeminiHeaders, GeminiStatus;
+IMPORT Sockets, Tls, GeminiPunycode, GeminiUrls, GeminiHeaders, GeminiStatus, GeminiTrust;
 
 CONST
   (* Error kinds *)
@@ -46,12 +46,20 @@ CONST
   tls* = 4;          (* TLS: a key pair that won't load, a handshake that
                         fails, the server's certificate not verified by
                         the CA file, the request not sent *)
-  untrusted* = 5;    (* the trust store refuses the server (Phase 5) *)
-  changed* = 6;      (* the server's key isn't the one known (Phase 5) *)
+  untrusted* = 5;    (* the trust store refuses the server, or can't be
+                        written *)
+  changed* = 6;      (* the server's key isn't the one the trust store
+                        knows, and its certificate hasn't expired *)
   header* = 7;       (* the header is malformed, or the response ended in it *)
   truncated* = 8;    (* the body ended without close_notify *)
   timedOut* = 9;     (* the deadline passed *)
   tooLong* = 10;     (* the body is over Options.maxBody *)
+  redirect* = 11;    (* FetchFollowing: a redirect not followed, as a
+                        loop, too many, an empty location or one that
+                        isn't a gemini URL, or another host the policy
+                        refused *)
+
+  MaxRedirects* = 5; (* followed at most, by the specification *)
 
   DefaultDeadline* = 10000;   (* ms, from connecting to close_notify *)
   MaxPath* = 1023;            (* a key, certificate or CA file's name at most *)
@@ -75,14 +83,18 @@ TYPE
      certFile, keyFile: a client certificate and its key, PEM files,
      "" for none (both or neither).
      caFile: CA certificates, PEM, that must have signed the server's,
-     which must also name the URL's host; "" to check nothing (the
-     trust store of Phase 5 will be the usual choice).
+     which must also name the URL's host; "" to check nothing, the
+     usual choice, with trust.
+     trust: the store of known servers whose Check is asked about the
+     server's key after the handshake and before the request is sent
+     (GeminiTrust); NIL, the default, to ask nothing.
      maxBody: the most bytes of body accepted, 0 for no limit, the
      default: a program that reads a stream needs none. *)
   Options* = RECORD
     deadline*: LONGINT;
     certFile*, keyFile*, caFile*: Path;
-    maxBody*: LONGINT
+    maxBody*: LONGINT;
+    trust*: GeminiTrust.Store
   END;
 
   (* How a fetch waits: GeminiClient's through Tasks, GeminiFetch's in
@@ -100,7 +112,11 @@ TYPE
      version the TLS version agreed ("TLSv1.3"), for a program to warn
      when a client certificate went over TLS 1.2, as the specification
      asks; peerHash the server certificate's fingerprint ("SHA256:" and
-     hex). bodyRead counts the body's bytes read so far. complete: the
+     hex); keyHash the fingerprint of its public key, the one the trust
+     store knows it by ("SHA256:" and hex), and notAfter the
+     certificate's expiry (Unix seconds); trust what the store's Check
+     said (GeminiTrust.known .. failed), or -1 if none was asked.
+     bodyRead counts the body's bytes read so far. complete: the
      response has ended with close_notify; while it is FALSE after the
      end, error says why. *)
   Response* = POINTER TO ResponseDesc;
@@ -110,6 +126,9 @@ TYPE
     meta-: ARRAY GeminiHeaders.MaxMeta + 1 OF CHAR;
     version-: ARRAY 32 OF CHAR;
     peerHash-: ARRAY 128 OF CHAR;
+    keyHash-: ARRAY 128 OF CHAR;
+    notAfter-: HUGEINT;
+    trust-: INTEGER;
     bodyRead-: LONGINT;
     complete-: BOOLEAN;
     error-: Error;
@@ -123,6 +142,10 @@ TYPE
   END;
 
   Chars* = POINTER TO ARRAY OF CHAR;
+
+  (* Asked by FetchFollowing about a redirect from one host and port to
+     another: TRUE to follow it. *)
+  RedirectPolicy* = PROCEDURE (VAR from, to: GeminiUrls.URL): BOOLEAN;
 
 (* Waiter *)
 
@@ -182,7 +205,7 @@ PROCEDURE InitOptions*(VAR o: Options);
 BEGIN
   o.deadline := DefaultDeadline;
   o.certFile := ""; o.keyFile := ""; o.caFile := "";
-  o.maxBody := 0
+  o.maxBody := 0; o.trust := NIL
 END InitOptions;
 
 (* Closing *)
@@ -360,6 +383,7 @@ END ReadAll;
 PROCEDURE Start(r: Response; w: Waiter; VAR opts: Options);
 BEGIN
   r.w := w; r.status := 0; r.meta := ""; r.version := ""; r.peerHash := "";
+  r.keyHash := ""; r.notAfter := 0; r.trust := -1;
   r.bodyRead := 0; r.complete := FALSE; ClearError(r.error);
   r.s := NIL; r.conn := NIL; r.end := 0; r.maxBody := opts.maxBody;
   NEW(r.head); r.rest := 0; r.restEnd := 0
@@ -384,6 +408,22 @@ BEGIN
   END;
   RETURN c
 END NewConfig;
+
+(* Asks store about the server r is connected to, host (ASCII) and
+   port: FALSE, with r.error, if it refuses it. *)
+PROCEDURE Trusted(r: Response; store: GeminiTrust.Store; VAR host: ARRAY OF CHAR;
+    port: LONGINT): BOOLEAN;
+  VAR why: ARRAY MaxText + 1 OF CHAR;
+BEGIN
+  r.trust := store.Check(host, port, r.keyHash, r.notAfter, GeminiTrust.Now(), why);
+  CASE r.trust OF
+    GeminiTrust.known, GeminiTrust.added, GeminiTrust.replaced: RETURN TRUE
+  | GeminiTrust.changed: Fail(r, changed, why, "")
+  | GeminiTrust.expired, GeminiTrust.failed: Fail(r, untrusted, why, "")
+  ELSE Fail(r, untrusted, "the trust store's answer isn't one of GeminiTrust's", "")
+  END;
+  RETURN FALSE
+END Trusted;
 
 (* Connects, makes the TLS connection, and completes its handshake,
    which checks the server's certificate as the options say. *)
@@ -416,7 +456,9 @@ BEGIN
   IF ~Handshake(r) THEN Finish(r, FALSE); RETURN FALSE END;
   s := r.conn.Version(); IF s # NIL THEN COPY(s^, r.version) END;
   s := r.conn.PeerCertHash(); IF s # NIL THEN COPY(s^, r.peerHash) END;
-  RETURN TRUE
+  s := r.conn.PeerKeyHash(); IF s # NIL THEN COPY(s^, r.keyHash) END;
+  r.notAfter := r.conn.PeerCertNotAfter();
+  RETURN (opts.trust = NIL) OR Trusted(r, opts.trust, host, port)
 END Open;
 
 (* Reads the header, and the body that came with it, into r.head, and
@@ -485,5 +527,53 @@ BEGIN
   IF GeminiStatus.Class(r.status) # GeminiStatus.SuccessClass THEN ReadEnd(r) END;
   RETURN TRUE
 END Fetch;
+
+(* Fetches the URL in link as Fetch does, and follows the redirects the
+   server gives (status 30 and 31), at most max of them (0, or more
+   than MaxRedirects, means MaxRedirects, the specification's limit),
+   each location resolved against the URL that gave it, so the old
+   query isn't carried over and a fragment only as RFC 3986 carries it
+   (P "Redirection"). Each fetch has opts and its own deadline. A
+   redirect to another host or port is followed only if policy, asked
+   about it, says so (NIL refuses every one); the scheme must stay
+   gemini. TRUE, as Fetch, with the last response, whose url is where
+   it ended; FALSE, with r.error, if a fetch failed, or a redirect
+   wasn't followed (kind redirect), r then the response that gave
+   it. *)
+PROCEDURE FetchFollowing*(w: Waiter; link-: ARRAY OF CHAR; VAR opts: Options; max: INTEGER;
+    policy: RedirectPolicy; VAR r: Response): BOOLEAN;
+  TYPE Seen = POINTER TO RECORD next: Seen; url: GeminiUrls.Text END;
+  VAR next: POINTER TO GeminiUrls.URL; seen, v: Seen; count: INTEGER;
+    why: ARRAY MaxText + 1 OF CHAR; text: POINTER TO GeminiUrls.Text;
+BEGIN
+  IF (max <= 0) OR (max > MaxRedirects) THEN max := MaxRedirects END;
+  IF ~Fetch(w, link, opts, r) THEN RETURN FALSE END;
+  NEW(next); NEW(text); seen := NIL; count := 0;
+  WHILE GeminiStatus.Class(r.status) = GeminiStatus.RedirectClass DO
+    (* r.url as written, among those seen, so a loop is found *)
+    NEW(v); IF ~GeminiUrls.Write(r.url, v.url) THEN v.url := "" END;
+    v.next := seen; seen := v;
+    IF count = max THEN Fail(r, redirect, "too many redirects", ""); RETURN FALSE END;
+    IF r.meta = "" THEN Fail(r, redirect, "a redirect to nowhere", ""); RETURN FALSE END;
+    IF ~GeminiUrls.Resolve(r.url, r.meta, next^, why) THEN
+      Fail(r, redirect, "the redirect's location", why); RETURN FALSE
+    END;
+    IF next.scheme # "gemini" THEN
+      Fail(r, redirect, "a redirect to a URL that isn't gemini", r.meta); RETURN FALSE
+    END;
+    IF ((next.host # r.url.host) OR (GeminiUrls.Port(next^) # GeminiUrls.Port(r.url)))
+      & ((policy = NIL) OR ~policy(r.url, next^)) THEN
+      Fail(r, redirect, "a redirect to another host, refused", r.meta); RETURN FALSE
+    END;
+    IF ~GeminiUrls.Write(next^, text^) THEN
+      Fail(r, redirect, "the redirect's location is too long", ""); RETURN FALSE
+    END;
+    v := seen; WHILE (v # NIL) & (v.url # text^) DO v := v.next END;
+    IF v # NIL THEN Fail(r, redirect, "a redirect loop", r.meta); RETURN FALSE END;
+    INC(count);
+    IF ~Fetch(w, text^, opts, r) THEN RETURN FALSE END
+  END;
+  RETURN TRUE
+END FetchFollowing;
 
 END GeminiResponses.

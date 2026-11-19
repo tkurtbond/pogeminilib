@@ -651,6 +651,7 @@ for one), assigned as modules need them:
 | 126 | `GeminiHeaders` | `Ended` or `Parse`: a length past the array |
 | 127 | `GeminiResponses` | `Waiter.Connect` or `Await` not overridden by an extension |
 | 128 | `GeminiResponses` | `Response.Read`: a position or length outside the buffer |
+| 129 | `GeminiTrust` | `Store.Check` not overridden by an extension |
 
 `GeminiPunycode` and `GeminiUrls` take only outside data, so nothing
 in them halts. Each halt is an `ASSERT`, so it exits with poc's status
@@ -949,7 +950,7 @@ child; `test/make-certs.sh`, polibtls's, making the certificates into
   a stalled URL among others, ending in about its deadline, from
   `TestClient`.
 
-### Phase 5: trust, redirects and identities
+### Phase 5: trust, redirects and identities [done]
 
 First, in polibtls's repository, with its tests, and reinstalled: the
 peer's public-key hash (Trust), and a certificate file's hash and
@@ -968,6 +969,72 @@ on (its hash as the server's log shows it), the files' modes, a name
 that would escape the directory refused, no `openssl` on `PATH`
 reported; made with the OpenSSL and LibreSSL of each host. `GeminiGet`
 gains `-known-hosts` and `-identity`.
+
+Done 2026-11-18: `GeminiTrust`, `FetchFollowing` (in
+`GeminiResponses`, given a waiter, and in `GeminiClient` and
+`GeminiFetch`), `GeminiIdentities`; `TestTrust`, `TestRedirects`,
+`TestIdentities`, `GeminiGet`'s new options run from `TestFetch`, and
+halt test 129 (`HaltTrustStore`). `make test` and `make valgrind`
+pass on Linux, and `gmake test` (pogeminilib's and pounix's) on alerik
+(FreeBSD amd64, OpenSSL 3.5.6), artos and yishana (NetBSD amd64 and
+i386, OpenSSL 3.5.7) and jherek and cymoril (OpenBSD amd64 and i386,
+LibreSSL 4.3.0), identities made with each one's `openssl`. Decided
+and found:
+
+- **pounix gained what the files needed** (its Phase 9, in its
+  repository, with its tests, and reinstalled): `UnixFiles.OpenWrite`
+  with create, truncate, exclusive and append and a mode, `Write`,
+  `Sync`, `Rename`, `Remove`, `ModeOf`. poc's `Files` would not do:
+  it halts (99) when it can't create or rename a file, and outside
+  data never halts here.
+- **NetBSD's read(2) of a directory gives its entries** (512 bytes of
+  them, on NetBSD 11.0, where `cat` of a directory prints them), not
+  EISDIR as Linux, FreeBSD and OpenBSD: a directory named as the known
+  hosts or scopes file was read as a file of junk lines. So both
+  readers try `UnixFiles.OpenDirectory` on the path first and refuse
+  a directory themselves (found by `gmake test` on artos and yishana).
+- **`UnixFiles.NextName` ends a directory with `TRUE` and the name
+  `""`**, not `FALSE` (`FALSE` is an error): a first loop on `FALSE`
+  alone never ended.
+- **A save is whole, at once**: each change to a known hosts or
+  scopes file writes the file to `<path>.<pid>.<n>.tmp`, created
+  exclusively with mode 600 (another name tried while one exists, at
+  most 100), synced and renamed over it. If that fails the change is
+  undone in memory and the caller gets `FALSE` (trust: `failed`,
+  error `untrusted`) with the reason, so memory and file agree.
+- **The known hosts file**: `<host>:<port> spki-sha256 <hex>
+  <notAfter>`, the host lowercase ASCII, an IPv6 address in brackets;
+  fields separated by blanks or tabs, CR LF accepted; a NUL read as a
+  blank; a file over 4 MiB, or a directory, refused. A response's
+  `trust` is what the store's `Check` said, or -1 if none was asked.
+  A changed key is refused before the request is sent: the test
+  server's `/count` says how many requests it has read.
+- **Redirects**: error kind `redirect` for one not followed (too many,
+  a loop, another scheme, another host refused, a location that won't
+  resolve). The empty location never reaches `FetchFollowing`:
+  `GeminiHeaders` already refuses a 3x with no URL, as a malformed
+  header. A loop is a URL fetched before in the chain, compared as
+  written by `GeminiUrls.Write`; another host is another host or
+  port, and asks the `RedirectPolicy`, `NIL` refusing. The URLs are
+  on the heap (3.4 KB each), not a task's stack. The test server
+  gained `/count`, `/r/to?<location>`, `/r/self` and `/r/chain/<n>`.
+- **Identities**: `Make(dir, name, commonName, days, ...)`, the name
+  1..64 of letters, digits, `.`, `_`, `-`, not starting with `.`
+  (so never a path), the common name printable ASCII without `/`,
+  `\`, `+` or `=` (which `-subj` reads), the days 1..36500,
+  `DefaultDays` 7300; the script is `GemCert`'s without a
+  subjectAltName and with the CN and days as arguments. Exit 127
+  means no `openssl`, checked by the test running itself with `PATH`
+  empty of it. `List` passes over a `.crt` it can't read or with no
+  `.key`; `Load` says which. `Use` puts one in a fetch's options.
+- **Scopes** (`OpenScopes`, `Attach`, `Detach`, `For`): a file the
+  program names, `<name> <host>:<port> <path>` a line, other lines
+  kept; `For` offers the attachment with the longest path that the
+  URL's is, or is below on a segment boundary (`/app` covers `/app`
+  and `/app/x`, not `/apple`), no path meaning `/`.
+- `GeminiGet`: `-known-hosts file` and `-identity dir/name`; it now
+  shows the server's key's hash, not the certificate's, when nothing
+  is checked, as that is what is pinned.
 
 ### Phase 6: an example browser
 

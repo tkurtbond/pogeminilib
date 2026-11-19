@@ -23,6 +23,11 @@ MODULE TestServer; (* a Gemini server that misbehaves on purpose, for the client
      /stall        nothing, until the client goes away
      /stallbody    20 and "partial", then nothing, as /stall
      /status/NN    NN and "status NN"
+     /count        20, and how many requests it had read before this
+                   one, so a test can tell whether a request was sent
+     /r/to?LOC     30 LOC, the query as it came
+     /r/self       30 /r/self, a loop
+     /r/chain/N    30 /r/chain/N-1, N redirects before 20 "chain end"
      anything else 20 text/gemini, and lines "url" (the request's URL),
                    "sni" (the name the client sent, or "-") and "cert"
                    (its certificate's fingerprint, or "-")
@@ -53,6 +58,7 @@ TYPE
 
 VAR
   ctx: Tls.Context;
+  requests: LONGINT;   (* read so far *)
 
 PROCEDURE Append(VAR s: ARRAY OF CHAR; VAR i: LONGINT; part: ARRAY OF CHAR);
   VAR j: LONGINT;
@@ -124,6 +130,12 @@ BEGIN
   RETURN n
 END Number;
 
+PROCEDURE Int(VAR s: ARRAY OF CHAR; VAR i: LONGINT; n: LONGINT);
+BEGIN
+  IF n >= 10 THEN Int(s, i, n DIV 10) END;
+  Put(s, i, CHR(ORD("0") + n MOD 10))
+END Int;
+
 PROCEDURE Send(c: Tls.Connection; VAR t: ARRAY OF CHAR; len: LONGINT): BOOLEAN;
   VAR n: LONGINT;
 BEGIN RETURN (len = 0) OR TlsTasks.WriteAll(c, t, 0, len, n)
@@ -145,7 +157,7 @@ END SendBig;
 
 (* What the request in url gets: sends it, and says how to end. *)
 PROCEDURE Respond(c: Tls.Connection; url: ARRAY OF CHAR; VAR stall, cut: BOOLEAN): BOOLEAN;
-  VAR t: Text; path: ARRAY MaxUrl + 1 OF CHAR; i: LONGINT; s: Tls.String;
+  VAR t: Text; path: ARRAY MaxUrl + 1 OF CHAR; i, j: LONGINT; s: Tls.String;
 BEGIN
   NEW(t); t[0] := 0X; i := 0; stall := FALSE; cut := FALSE;
   PathOf(url, path);
@@ -165,6 +177,18 @@ BEGIN
   ELSIF path = "/stall" THEN stall := TRUE
   ELSIF path = "/stallbody" THEN
     Append(t^, i, "20 text/gemini"); CrLf(t^, i); Append(t^, i, "partial"); stall := TRUE
+  ELSIF path = "/count" THEN
+    Append(t^, i, "20 text/plain"); CrLf(t^, i); Int(t^, i, requests - 1)
+  ELSIF StartsWith(path, "/r/to?") THEN
+    Append(t^, i, "30 "); j := 6;
+    WHILE path[j] # 0X DO Put(t^, i, path[j]); INC(j) END;
+    CrLf(t^, i)
+  ELSIF path = "/r/self" THEN Append(t^, i, "30 /r/self"); CrLf(t^, i)
+  ELSIF StartsWith(path, "/r/chain/") THEN
+    j := Number(path, 9);
+    IF j = 0 THEN Append(t^, i, "20 text/gemini"); CrLf(t^, i); Append(t^, i, "chain end")
+    ELSE Append(t^, i, "30 /r/chain/"); Int(t^, i, j - 1); CrLf(t^, i)
+    END
   ELSIF StartsWith(path, "/status/") & (path[8] # 0X) & (path[9] # 0X) THEN
     Put(t^, i, path[8]); Put(t^, i, path[9]); Append(t^, i, " status ");
     Put(t^, i, path[8]); Put(t^, i, path[9]); CrLf(t^, i)
@@ -181,13 +205,17 @@ BEGIN
   RETURN Send(c, t^, i)
 END Respond;
 
+PROCEDURE Counted(): BOOLEAN;
+BEGIN INC(requests); RETURN TRUE
+END Counted;
+
 PROCEDURE (h: Handler) Run*;
   VAR c: Tls.Connection; url: ARRAY MaxUrl + 1 OF CHAR; stall, cut, closed: BOOLEAN;
 BEGIN
   closed := FALSE;
   IF ctx.AcceptSocket(h.s.fd, c) THEN
     c.SetDeadline(Deadline);
-    IF TlsTasks.Handshake(c) & ReadRequest(c, url) & Respond(c, url, stall, cut) THEN
+    IF TlsTasks.Handshake(c) & ReadRequest(c, url) & Counted() & Respond(c, url, stall, cut) THEN
       IF stall THEN
         (* until the client gives up and closes, which makes the socket
            readable *)

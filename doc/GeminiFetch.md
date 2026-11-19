@@ -28,3 +28,12 @@ PROCEDURE Fetch*(link-: ARRAY OF CHAR; VAR opts: GeminiResponses.Options;
 ```
 
 Fetches the URL in link with opts, blocking, as GeminiResponses.Fetch: TRUE when the header has come, with r's status and meta, and a success's body to be read (r.Read, r.ReadAll); FALSE with r.error if the fetch failed before then.
+
+#### FetchFollowing
+
+```oberon
+PROCEDURE FetchFollowing*(link-: ARRAY OF CHAR; VAR opts: GeminiResponses.Options;
+    max: INTEGER; policy: GeminiResponses.RedirectPolicy; VAR r: GeminiResponses.Response): BOOLEAN;
+```
+
+Fetches the URL in link with opts, blocking, following at most max redirects, those to another host only if policy says so, as GeminiResponses.FetchFollowing.

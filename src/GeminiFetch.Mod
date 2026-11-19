@@ -43,6 +43,14 @@ PROCEDURE Fetch*(link-: ARRAY OF CHAR; VAR opts: GeminiResponses.Options;
 BEGIN RETURN GeminiResponses.Fetch(waiter, link, opts, r)
 END Fetch;
 
+(* Fetches the URL in link with opts, blocking, following at most max
+   redirects, those to another host only if policy says so, as
+   GeminiResponses.FetchFollowing. *)
+PROCEDURE FetchFollowing*(link-: ARRAY OF CHAR; VAR opts: GeminiResponses.Options;
+    max: INTEGER; policy: GeminiResponses.RedirectPolicy; VAR r: GeminiResponses.Response): BOOLEAN;
+BEGIN RETURN GeminiResponses.FetchFollowing(waiter, link, opts, max, policy, r)
+END FetchFollowing;
+
 BEGIN
   NEW(waiter)
 END GeminiFetch.

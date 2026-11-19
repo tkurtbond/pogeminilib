@@ -34,8 +34,10 @@ and `GeminiTextWriter`, with `TestText` and halt tests 120..123) and 3
 (`GeminiStatus` and `GeminiHeaders`, with `TestHeaders` and halt tests
 124..126) and 4 (`GeminiResponses`, `GeminiClient` and
 `GeminiFetch`, with `TestFetch`, `TestClient`, halt tests 127 and 128,
-and the examples `GeminiGet` and `GeminiFetchAll`) are done; Phase 5
-(trust, redirects and identities) is next. The questions in PLAN.md
+and the examples `GeminiGet` and `GeminiFetchAll`) and 5 (`GeminiTrust`,
+`FetchFollowing` and `GeminiIdentities`, with `TestTrust`,
+`TestRedirects`, `TestIdentities` and halt test 129) are done; Phase 6
+(an example browser) is next. The questions in PLAN.md
 are all decided (struck through there, each recorded where it
 applies). The changes Phase 5 needed in another repository are made:
 polibtls's `Connection.PeerKeyHash` and its `TlsCerts` module, in
