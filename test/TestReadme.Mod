@@ -10,7 +10,7 @@ MODULE TestReadme; (* README.md's programs, run as it shows them *)
    a port the kernel chooses, with the tests' server-ec pair, then with
    other-ec on the same port, so Get sees a key that has changed;
    Identity is run against GeminiServe, whose page shows the client
-   certificate's hash, and needs openssl, so it skips without. *)
+   certificate's hash. *)
 
 IMPORT Out, Check, Child;
 
@@ -180,7 +180,6 @@ END Served;
 PROCEDURE Identified;
   VAR out, page, hash: Text; i, j: LONGINT;
 BEGIN
-  IF Shell("command -v openssl", out) # 0 THEN Check.Skip("Identity: no openssl"); RETURN END;
   IF ~Start("../GeminiServe -port 0 -cert ../certs/self-ec.crt -key ../certs/self-ec.key") THEN
     Check.Check(FALSE, "GeminiServe starts and says its port"); RETURN
   END;

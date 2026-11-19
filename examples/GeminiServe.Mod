@@ -1,15 +1,18 @@
 MODULE GeminiServe; (* a small Gemini server, on GeminiServer *)
 
-(* Usage: GeminiServe -cert file -key file [-listen host] [-port port]
-                     [-host name] [-n count] [-deadline ms] [-connections n]
+(* Usage: GeminiServe (-cert file -key file | -certs dir) [-listen host]
+                     [-port port] [-host name] [-n count] [-deadline ms]
+                     [-connections n]
 
    Serves a page made as it is asked for, at "/" of host name
    ("localhost" if not given), and a greeting at "/hello", which asks
    for a name (10) and answers with it; anything else is 51, a request
    GeminiUrls.CheckRequest refuses gets its status and why, and one for
    another host or port 53. It presents the certificate in -cert and
-   -key, and accepts any client certificate, as a Gemini server does,
-   showing its hash on the page.
+   -key, or, with -certs, its own for the host name, made in dir the
+   first time and kept there (GeminiIdentities.Ensure); and accepts any
+   client certificate, as a Gemini server does, showing its hash on the
+   page.
 
    It listens on -listen ("" for every local address, IPv6 and IPv4
    alike) at -port (1965; 0 for one the kernel chooses), says "port
@@ -30,15 +33,19 @@ MODULE GeminiServe; (* a small Gemini server, on GeminiServer *)
    and the tests drive it (TestServe, TestRun). *)
 
 IMPORT Platform, Out, Err, Args, Clocks, Instants, TimeStrings, Sockets, Tls,
-  GeminiUrls, GeminiTextWriter, GeminiServer;
+  GeminiUrls, GeminiTextWriter, GeminiIdentities, GeminiServer;
+
+CONST
+  Days = 3650;  (* a made certificate's lifetime *)
 
 VAR
   host: ARRAY 256 OF CHAR;   (* the one served, "" for any *)
 
 PROCEDURE Usage;
 BEGIN
-  Err.String("usage: GeminiServe -cert file -key file [-listen host] [-port port]"); Err.Ln;
-  Err.String("                   [-host name] [-n count] [-deadline ms] [-connections n]"); Err.Ln;
+  Err.String("usage: GeminiServe (-cert file -key file | -certs dir) [-listen host]"); Err.Ln;
+  Err.String("                   [-port port] [-host name] [-n count] [-deadline ms]"); Err.Ln;
+  Err.String("                   [-connections n]"); Err.Ln;
   Platform.Exit(2)
 END Usage;
 
@@ -160,11 +167,11 @@ BEGIN
 END Log;
 
 PROCEDURE Main;
-  VAR i: INTEGER; arg, cert, key, listen: ARRAY 1024 OF CHAR;
-    port, count, deadline, limit: LONGINT;
-    c: Tls.Config; ctx: Tls.Context; s: GeminiServer.Server; err: Sockets.Error;
+  VAR i: INTEGER; arg, cert, key, certs, listen, name: ARRAY 1024 OF CHAR;
+    port, count, deadline, limit: LONGINT; id: GeminiIdentities.Identity;
+    why: ARRAY 512 OF CHAR; c: Tls.Config; ctx: Tls.Context; s: GeminiServer.Server; err: Sockets.Error;
 BEGIN
-  cert := ""; key := ""; listen := ""; host := "localhost";
+  cert := ""; key := ""; certs := ""; listen := ""; host := "localhost";
   port := 1965; count := 0; deadline := GeminiServer.DefaultDeadline;
   limit := GeminiServer.DefaultLimit;
   i := 1;
@@ -174,6 +181,7 @@ BEGIN
     INC(i);
     IF arg = "-cert" THEN Args.Get(i, cert)
     ELSIF arg = "-key" THEN Args.Get(i, key)
+    ELSIF arg = "-certs" THEN Args.Get(i, certs)
     ELSIF arg = "-listen" THEN Args.Get(i, listen)
     ELSIF arg = "-host" THEN Args.Get(i, host)
     ELSIF arg = "-port" THEN port := -1; Args.GetInt(i, port); IF (port < 0) OR (port > 65535) THEN Usage END
@@ -184,7 +192,14 @@ BEGIN
     END;
     INC(i)
   END;
-  IF (cert = "") OR (key = "") THEN Usage END;
+  IF certs # "" THEN
+    IF (cert # "") OR (key # "") THEN Usage END;
+    (* Named for the host it serves, or localhost if it serves any. *)
+    IF host = "" THEN name := "localhost" ELSE COPY(host, name) END;
+    IF ~GeminiIdentities.Ensure(certs, name, "", Days, id, why) THEN Fail(certs, why) END;
+    COPY(id.certFile, cert); COPY(id.keyFile, key)
+  ELSIF (cert = "") OR (key = "") THEN Usage
+  END;
 
   c := Tls.NewConfig();
   IF ~c.SetKeypairFile(cert, key) THEN Fail(cert, c.error.text^) END;

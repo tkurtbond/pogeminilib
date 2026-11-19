@@ -13,12 +13,15 @@ MODULE TestRun; (* Running a GeminiServer: stopping, its limit, its log *)
      connection, the next waits until it goes; with -connections 2 it
      doesn't wait;
    - every line of the log after the port begins with the time, UTC,
-     as 2026-11-16T12:34:56Z. *)
+     as 2026-11-16T12:34:56Z;
+   - -certs: it makes its own certificate in a directory it makes,
+     serves with it, and the next time keeps it. *)
 
 IMPORT Out, Platform, Tasks, Sockets, SocketTasks, Check, Child, RawClient;
 
 CONST
   Certs = "../build/certs/";
+  Made = "../build/test-TestRun/certs";  (* for -certs *)
   StackSize = 1024 * 1024;  (* see TestServe *)
   CR = 0DX; LF = 0AX;
   Hold = 1000;   (* ms the silent client holds the one connection *)
@@ -30,7 +33,7 @@ TYPE
   Closer = POINTER TO RECORD (Tasks.TaskDesc) s: Sockets.Socket END;
 
 CONST
-  Term = 1; Limited = 2; Unlimited = 3;
+  Term = 1; Limited = 2; Unlimited = 3; Fetch = 4;
 
 VAR
   server: Child.Child;
@@ -73,12 +76,24 @@ BEGIN
   RETURN ok
 END Timed;
 
-(* Starts the server with args, and reads the port it listens on. *)
+(* Whether the shell command cmd exits 0. *)
+PROCEDURE Shell(cmd: ARRAY OF CHAR): BOOLEAN;
+  VAR c: Child.Child; out: Text; n: LONGINT;
+BEGIN
+  RETURN Child.Spawn(cmd, "", 0, c) & (Child.Wait(c, out, n) = 0)
+END Shell;
+
+(* Starts the server with args, with the tests' self-signed pair
+   unless args has -certs, and reads the port it listens on. *)
 PROCEDURE Start(args: ARRAY OF CHAR): BOOLEAN;
   VAR cmd: Text; line: ARRAY 64 OF CHAR; i, n: LONGINT;
 BEGIN
-  cmd := "exec ../build/GeminiServe -port 0 -cert "; Append(cmd, Certs); Append(cmd, "self-ec.crt -key ");
-  Append(cmd, Certs); Append(cmd, "self-ec.key "); Append(cmd, args);
+  cmd := "exec ../build/GeminiServe -port 0 ";
+  IF ~Check.Contains(args, "-certs") THEN
+    Append(cmd, "-cert "); Append(cmd, Certs); Append(cmd, "self-ec.crt -key ");
+    Append(cmd, Certs); Append(cmd, "self-ec.key ")
+  END;
+  Append(cmd, args);
   IF ~Child.Spawn(cmd, "", 0, server) OR ~Child.ReadLine(server, line, 15000) OR (line[0] # "p") THEN
     Check.Check(FALSE, "the server starts and says its port");
     Child.Kill(server); IF Child.Wait(server, got, n) # 0 THEN END;
@@ -150,6 +165,8 @@ BEGIN
       Check.Check(n < Hold - 400, "  ... at once")
     END;
     Tasks.Join(closer)
+  ELSIF t.kind = Fetch THEN
+    Check.Check(Served(RawClient.Fetch("127.0.0.1", port, req, len, "", "")), "  ... and serves with it")
   END
 END Run;
 
@@ -188,6 +205,18 @@ BEGIN
   IF Start("-connections 2 -n 2 -deadline 5000") THEN
     Drive(Unlimited);
     Check.Check(Child.Wait(server, log, n) = 0, "  ... and the server exits 0")
+  END;
+
+  IF Shell("rm -rf ../build/test-TestRun/certs") & Start("-certs ../build/test-TestRun/certs -n 1") THEN
+    Check.Check(Shell("cd ../build/test-TestRun/certs && test -f localhost.crt && test -f localhost.key && cp localhost.crt was.crt"),
+      "-certs: a certificate made in a directory made for it");
+    Drive(Fetch);
+    Check.Check(Child.Wait(server, log, n) = 0, "  ... and the server exits 0");
+    IF Start("-certs ../build/test-TestRun/certs -n 0") THEN
+      Child.Interrupt(server); IF Child.Wait(server, log, n) # 0 THEN END;
+      Check.Check(Shell("cmp -s ../build/test-TestRun/certs/localhost.crt ../build/test-TestRun/certs/was.crt"),
+        "  ... and the next time, the same one")
+    END
   END;
 
   Check.Summary

@@ -1,9 +1,9 @@
-MODULE GeminiIdentities; (* client certificates: made, listed, and chosen for a URL *)
+MODULE GeminiIdentities; (* certificates: a client's made, listed, and chosen for a URL; a server's kept *)
 
 (* An identity is a client certificate and its key, which a capsule
    knows a user by (status 60): the files <name>.crt and <name>.key in a
-   directory the program gives. Make makes one, with openssl, since
-   libtls can't; List and Load read them, each with its certificate's
+   directory the program gives. Make makes one, through polibtls's
+   TlsMake; List and Load read them, each with its certificate's
    hash, as a server sees it ("SHA256:" and hex, polibtls's
    TlsCerts.CertHash, the same as Tls.Connection.PeerCertHash), and its
    validity (TlsCerts.Validity), all in Oberon. Use puts one in a
@@ -14,16 +14,22 @@ MODULE GeminiIdentities; (* client certificates: made, listed, and chosen for a 
    fetch: a 60 comes back to the program, which asks its user, and then
    calls Make, or picks one.
 
-   Make runs /bin/sh with a fixed script and the directory, name,
-   common name and lifetime as its arguments ($1..$4), so none of them
-   is read as shell syntax, as pogemini's GemCert does (PLAN.md,
-   "Client certificates"): openssl genpkey and req -x509, with only
-   what OpenSSL 3 and LibreSSL both accept, -sha256 named (LibreSSL
-   would sign with SHA-1, which GnuTLS refuses), ECDSA P-256, under
-   umask 077, the key written to a temporary name and renamed first,
-   the certificate last, so an identity exists exactly when its .crt
-   does. A name is letters, digits, ".", "_" and "-", not starting
-   with ".", so it can't name a file outside the directory.
+   Make makes the pair through polibtls's TlsMake, with the libcrypto
+   libtls loads, so no openssl command is needed (PLAN.md, "Client
+   certificates"): an ECDSA P-256 key, mode 600, then a self-signed
+   certificate, SHA-256, mode 644, each file written whole or not at
+   all, the key first, so an identity exists exactly when its .crt
+   does. A .key without its .crt, as an interrupted Make leaves, is
+   given its certificate. A name is letters, digits, ".", "_" and "-",
+   not starting with ".", so it can't name a file outside the
+   directory.
+
+   Ensure is the same for a server: the certificate a capsule presents,
+   made the first time and kept from then on, since Gemini clients pin
+   the certificate they first see (TOFU), and a new one at every start
+   would look like an attack. It is pogemini's, moved here so every
+   server on GeminiServer can make its own (PLAN.md, "A server's
+   certificate").
 
    Scopes says which identity to offer for a URL, by the common rule
    (as Lagrange and Amfora have it, and as P scopes a certificate made
@@ -38,10 +44,10 @@ MODULE GeminiIdentities; (* client certificates: made, listed, and chosen for a 
    they are and otherwise ignored. The file is written as GeminiTrust's
    is: whole, to a temporary name, synced and renamed.
 
-   Outside data never halts: a file that can't be read or written, an
-   openssl that fails or isn't there, come back as FALSE and a reason. *)
+   Outside data never halts: a file that can't be read or written, or a
+   pair that can't be made, comes back as FALSE and a reason. *)
 
-IMPORT Platform, UnixErrors, UnixFiles, UnixProcesses, TlsCerts,
+IMPORT Platform, Directories, Clocks, Instants, UnixErrors, UnixFiles, Tls, TlsCerts, TlsMake,
   GeminiPunycode, GeminiUrls, GeminiResponses;
 
 CONST
@@ -54,13 +60,7 @@ CONST
   MaxKey = 272;         (* "[" host "]:" port *)
   MaxTries = 100;
   Mode = 180H;          (* 600 octal *)
-  NotFound = 127;       (* the script's status for a missing openssl *)
-
-  (* What makes the pair, run by /bin/sh with the directory, the name,
-     the common name and the days as $1..$4. sh by its full path, as
-     system(3) does; openssl by PATH. The configuration is the script's
-     own, since the system's default extensions differ. *)
-  Script = 'command -v openssl >/dev/null 2>&1 || exit 127; umask 077 && cd "$1" && printf "[req]\ndistinguished_name = dn\n[dn]\n[x]\nbasicConstraints = critical,CA:FALSE\n" > "$2.cnf.tmp" && openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out "$2.key.tmp" 2>/dev/null && openssl req -config "$2.cnf.tmp" -new -x509 -sha256 -days "$4" -extensions x -subj "/CN=$3" -key "$2.key.tmp" -out "$2.crt.tmp" 2>/dev/null && chmod 644 "$2.crt.tmp" && mv -f "$2.key.tmp" "$2.key" && mv -f "$2.crt.tmp" "$2.crt"; s=$?; rm -f "$2.cnf.tmp" "$2.key.tmp" "$2.crt.tmp"; exit $s';
+  DirMode = 1C0H;       (* 700 octal: a directory Ensure makes *)
 
 TYPE
   Chars = POINTER TO ARRAY OF CHAR;
@@ -123,10 +123,9 @@ BEGIN
   WHILE i > 0 DO DEC(i); t[0] := d[i]; Append(s, t) END
 END AppendInt;
 
-(* Whether name can be an identity's: 1..MaxName of letters, digits,
-   ".", "_" and "-", not starting with ".", so neither a path nor a
-   hidden file. *)
-PROCEDURE ValidName*(name-: ARRAY OF CHAR): BOOLEAN;
+(* ValidName's rule, and ':' too if colon, for a server named by its
+   IPv6 address: harmless in a file's name, and never a path. *)
+PROCEDURE Named(name-: ARRAY OF CHAR; colon: BOOLEAN): BOOLEAN;
   VAR i, n: LONGINT; c: CHAR;
 BEGIN
   n := Length(name);
@@ -134,16 +133,23 @@ BEGIN
   FOR i := 0 TO n - 1 DO
     c := name[i];
     IF ~((c >= "a") & (c <= "z") OR (c >= "A") & (c <= "Z") OR (c >= "0") & (c <= "9")
-        OR (c = ".") OR (c = "_") OR (c = "-")) THEN
+        OR (c = ".") OR (c = "_") OR (c = "-") OR colon & (c = ":")) THEN
       RETURN FALSE
     END
   END;
   RETURN TRUE
+END Named;
+
+(* Whether name can be an identity's: 1..MaxName of letters, digits,
+   ".", "_" and "-", not starting with ".", so neither a path nor a
+   hidden file. *)
+PROCEDURE ValidName*(name-: ARRAY OF CHAR): BOOLEAN;
+BEGIN RETURN Named(name, FALSE)
 END ValidName;
 
 (* Whether cn can be a certificate's common name here: 1..MaxName
-   printable ASCII characters, none of "/", "\", "+" and "=", which
-   openssl's -subj reads as its own. *)
+   printable ASCII characters, as many as X.509's CN holds (ub-common-name,
+   which TlsMake enforces too). *)
 PROCEDURE ValidCommonName(cn-: ARRAY OF CHAR): BOOLEAN;
   VAR i, n: LONGINT; c: CHAR;
 BEGIN
@@ -151,7 +157,7 @@ BEGIN
   IF (n = 0) OR (n > MaxName) THEN RETURN FALSE END;
   FOR i := 0 TO n - 1 DO
     c := cn[i];
-    IF (c < " ") OR (c > "~") OR (c = "/") OR (c = "\") OR (c = "+") OR (c = "=") THEN
+    IF (c < " ") OR (c > "~") THEN
       RETURN FALSE
     END
   END;
@@ -166,12 +172,14 @@ BEGIN
   RETURN TRUE
 END Join;
 
-(* Whether path names something, as far as can be told. *)
+(* Whether path names something, as far as can be told: not if it or
+   a directory on the way is missing, or that is a file (ENOTDIR), so
+   Ensure then tries to make the directory, and says it can't. *)
 PROCEDURE Exists(VAR path: ARRAY OF CHAR): BOOLEAN;
   VAR fd: LONGINT; err: UnixErrors.Error;
 BEGIN
   IF UnixFiles.OpenRead(path, {UnixFiles.nonBlocking}, fd, err) THEN UnixFiles.Close(fd); RETURN TRUE END;
-  RETURN err.code # UnixErrors.ENOENT
+  RETURN (err.code # UnixErrors.ENOENT) & (err.code # UnixErrors.ENOTDIR)
 END Exists;
 
 (* The file path, whole, at most max bytes, in buf[0..len-1]: FALSE,
@@ -212,13 +220,12 @@ END ReadFile;
 
 (* Identities *)
 
-(* The identity name in dir, read from its files: FALSE, with why, if
-   it isn't there, or its certificate can't be read. *)
-PROCEDURE Load*(dir-, name-: ARRAY OF CHAR; VAR id: Identity; VAR why: ARRAY OF CHAR): BOOLEAN;
+(* Load, the name Named(name, colon). *)
+PROCEDURE Loaded(dir-, name-: ARRAY OF CHAR; colon: BOOLEAN; VAR id: Identity; VAR why: ARRAY OF CHAR): BOOLEAN;
   VAR buf: Chars; len: LONGINT; missing: BOOLEAN;
 BEGIN
   why[0] := 0X; id := NIL;
-  IF ~ValidName(name) THEN COPY("not a name for an identity", why); RETURN FALSE END;
+  IF ~Named(name, colon) THEN COPY("not a name for an identity", why); RETURN FALSE END;
   NEW(id); id.next := NIL; COPY(name, id.name);
   IF ~Join(dir, name, ".crt", id.certFile) OR ~Join(dir, name, ".key", id.keyFile) THEN
     COPY("the identities' directory's name is too long", why); id := NIL; RETURN FALSE
@@ -235,17 +242,41 @@ BEGIN
     COPY(id.certFile, why); Append(why, " has no key beside it"); id := NIL; RETURN FALSE
   END;
   RETURN TRUE
+END Loaded;
+
+(* The identity name in dir, read from its files: FALSE, with why, if
+   it isn't there, or its certificate can't be read. *)
+PROCEDURE Load*(dir-, name-: ARRAY OF CHAR; VAR id: Identity; VAR why: ARRAY OF CHAR): BOOLEAN;
+BEGIN RETURN Loaded(dir, name, FALSE, id, why)
 END Load;
+
+(* Makes name's pair in dir, which exists: a key, unless one is there
+   already, then a certificate for it with common name cn and subject
+   alternative names names, valid for days days from now; and loads it
+   into id. *)
+PROCEDURE MakePair(dir-, name-, cn-, names-: ARRAY OF CHAR; days: LONGINT; VAR id: Identity;
+    VAR why: ARRAY OF CHAR): BOOLEAN;
+  VAR crt, key: GeminiResponses.Path; t: Instants.Instant; now: HUGEINT; error: Tls.String;
+BEGIN
+  IF ~Join(dir, name, ".crt", crt) OR ~Join(dir, name, ".key", key) THEN
+    COPY("the directory's name is too long", why); RETURN FALSE
+  END;
+  IF ~Exists(key) & ~TlsMake.EcKey(key, error) THEN COPY(error^, why); RETURN FALSE END;
+  Clocks.Now(t); now := Instants.UnixSeconds(t);
+  IF ~TlsMake.SelfSigned(key, crt, cn, names, FALSE, now, now + days * 86400, error) THEN
+    COPY(error^, why); RETURN FALSE
+  END;
+  RETURN Loaded(dir, name, TRUE, id, why)
+END MakePair;
 
 (* Makes the identity name in dir, which must exist, with commonName as
    its certificate's (name if ""), valid for days days from now (1..
    MaxDays; DefaultDays is long, as an identity should be): id, or
    FALSE, with why, if the name or common name can't be one, the
-   identity exists already, openssl isn't on PATH, or it fails. *)
+   identity exists already, or the pair can't be made. *)
 PROCEDURE Make*(dir-, name-, commonName-: ARRAY OF CHAR; days: LONGINT; VAR id: Identity;
     VAR why: ARRAY OF CHAR): BOOLEAN;
-  VAR crt: GeminiResponses.Path; cn: Name; d: ARRAY 12 OF CHAR;
-    cmd: UnixProcesses.Command; p: UnixProcesses.Process; err: UnixErrors.Error;
+  VAR crt: GeminiResponses.Path; cn: Name;
 BEGIN
   why[0] := 0X; id := NIL;
   IF ~ValidName(name) THEN
@@ -254,33 +285,54 @@ BEGIN
   END;
   IF commonName[0] = 0X THEN COPY(name, cn)
   ELSIF ValidCommonName(commonName) THEN COPY(commonName, cn)
-  ELSE COPY("a common name is printable ASCII, without '/', '\', '+' and '='", why); RETURN FALSE
+  ELSE COPY("a common name is 1 to 64 printable ASCII characters", why); RETURN FALSE
   END;
   IF (days < 1) OR (days > MaxDays) THEN COPY("an identity's lifetime is 1 to 36500 days", why); RETURN FALSE END;
-  IF ~Join(dir, name, ".key.tmp", crt) THEN
+  IF ~Join(dir, name, ".key", crt) THEN
     COPY("the identities' directory's name is too long", why); RETURN FALSE
   END;
   IF Join(dir, name, ".crt", crt) & Exists(crt) THEN
     COPY("an identity named ", why); Append(why, name); Append(why, " exists already"); RETURN FALSE
   END;
-  d := ""; AppendInt(d, days);
-  cmd := UnixProcesses.NewCommand("/bin/sh");
-  UnixProcesses.Add(cmd, "-c"); UnixProcesses.Add(cmd, Script);
-  UnixProcesses.Add(cmd, "sh");  (* $0 *)
-  UnixProcesses.Add(cmd, dir); UnixProcesses.Add(cmd, name); UnixProcesses.Add(cmd, cn);
-  UnixProcesses.Add(cmd, d);
-  UnixProcesses.SetInput(cmd, UnixProcesses.null);
-  UnixProcesses.SetOutput(cmd, UnixProcesses.null);
-  UnixProcesses.SetError(cmd, UnixProcesses.null);
-  IF ~UnixProcesses.Start(cmd, p, err) OR ~UnixProcesses.Wait(p, err) THEN
-    COPY(err.text, why); RETURN FALSE
-  ELSIF p.exited & (p.status = NotFound) THEN
-    COPY("openssl, which makes an identity, isn't on PATH", why); RETURN FALSE
-  ELSIF ~p.exited OR (p.status # 0) THEN
-    COPY("openssl failed to make an identity in ", why); Append(why, dir); RETURN FALSE
-  END;
-  RETURN Load(dir, name, id, why)
+  RETURN MakePair(dir, name, cn, "", days, id, why)
 END Make;
+
+(* The server certificate name in dir, in id: the pair made before, or,
+   the first time, a new one, with name as its common name and names
+   (name if "") as its subject alternative names, separated by spaces,
+   which libtls matches SNI against, valid for days days (1..MaxDays)
+   from when it is made. The name is ValidName's, but may hold ':', as
+   an IPv6 address does. dir is made if it isn't there, its owner's
+   only (700 octal); one that is is left as it is, since whoever made
+   it chose its mode. A .crt without its .key is refused, never
+   replaced. FALSE, with why, if the pair can't be had. *)
+PROCEDURE Ensure*(dir-, name-, names-: ARRAY OF CHAR; days: LONGINT; VAR id: Identity;
+    VAR why: ARRAY OF CHAR): BOOLEAN;
+  VAR d, crt: GeminiResponses.Path; err: UnixErrors.Error;
+BEGIN
+  why[0] := 0X; id := NIL;
+  IF ~Named(name, TRUE) THEN
+    COPY("a certificate's name is 1 to 64 letters, digits, '.', '_', '-' and ':', not starting with '.'", why);
+    RETURN FALSE
+  END;
+  IF (days < 1) OR (days > MaxDays) THEN COPY("a certificate's lifetime is 1 to 36500 days", why); RETURN FALSE END;
+  IF dir[0] = 0X THEN COPY("no directory for certificates", why); RETURN FALSE END;
+  IF (Length(dir) >= LEN(d)) OR ~Join(dir, name, ".key", crt) OR ~Join(dir, name, ".crt", crt) THEN
+    COPY("the certificate directory's name is too long", why); RETURN FALSE
+  END;
+  IF Exists(crt) THEN RETURN Loaded(dir, name, TRUE, id, why) END;
+  COPY(dir, d);
+  IF ~Exists(d) THEN
+    (* MakeDirectory gives the umask's mode, and makes any parents with
+       it too: only dir itself is made private. *)
+    IF ~Directories.MakeDirectory(d) THEN
+      COPY("can't make the certificate directory ", why); Append(why, dir); RETURN FALSE
+    END;
+    IF ~UnixFiles.ChangeMode(d, DirMode, err) THEN COPY(err.text, why); RETURN FALSE END
+  END;
+  IF names[0] = 0X THEN RETURN MakePair(dir, name, name, name, days, id, why) END;
+  RETURN MakePair(dir, name, name, names, days, id, why)
+END Ensure;
 
 (* The identities in dir, by name, in first (NIL for none): FALSE, with
    why, if dir can't be read. A missing dir has none. A .crt that can't

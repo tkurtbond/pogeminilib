@@ -44,7 +44,10 @@ run there as it finished, nothing Linux-only found) and 8 (the
 server engine, moved from pogemini: `GeminiServer`, with the example
 `GeminiServe`, and pogemini using it, its PLAN.md, "pogeminilib") and
 9 (documentation and install: README.md the user's guide, an example
-per module, `make install` checked on Linux and the BSDs) are done,
+per module, `make install` checked on Linux and the BSDs) and 10
+(`GeminiIdentities` making pairs through polibtls's `TlsMake`, so no
+`openssl` command, and `Ensure`, a server's certificate made once,
+moved from pogemini's `GemCert`; `GeminiServe -certs`) are done,
 every phase of the roadmap. The questions in PLAN.md
 are all decided (struck through there, each recorded where it
 applies). The changes Phase 5 needed in another repository are made:

@@ -38,8 +38,9 @@ gives them:
    generated pages.
 
 6. **Client certificates made**: a self-signed certificate and key for
-   an identity, by running `openssl` as pogemini's `GemCert` does
-   (decided with the user, 2026-11-18).
+   an identity, through polibtls's `TlsMake` (decided with the user,
+   2026-11-18; at first by running `openssl`, until Phase 10), and a
+   server's own certificate, made once and kept (`Ensure`, Phase 10).
 7. **Serving**: the server engine, moved from pogemini (decided with
    the user, 2026-11-18; "Should it serve as well?").
 
@@ -112,9 +113,9 @@ change until the library is settled.
   `LingeringClose`).
 - **poDateTime** (`~/Repos/Oberon/poDateTime`): `Clocks.Now` and
   `Instants` for a known host's expiry, and anything else timed.
-- **pounix** (`~/Repos/Oberon/pounix`): `UnixProcesses` to run
-  `openssl` for client certificates (`GeminiIdentities`), so a
-  dependency from Phase 5; `UnixFiles` for writing the trust store
+- **pounix** (`~/Repos/Oberon/pounix`): a dependency from Phase 5,
+  when `UnixProcesses` ran `openssl` for client certificates
+  (`GeminiIdentities`; not since Phase 10); `UnixFiles` for writing the trust store
   safely (a temporary name, then `rename`) and what else a file needs
   beyond poc's `Files`; `UnixTerminals` for the example browser's
   secret input (Phase 6).
@@ -268,7 +269,7 @@ Decided with the user, 2026-11-18.
 | `GeminiClient` | a fetch in tasks: connect, send, read the header, the body as a stream; redirects |
 | `GeminiFetch` | the same without tasks, for a program that doesn't use them (blocking) |
 | `GeminiTrust` | TOFU: the known-hosts store and the check against it |
-| `GeminiIdentities` | client certificates: made by `openssl`, kept, listed |
+| `GeminiIdentities` | client certificates: made through `TlsMake`, kept, listed; a server's, made once |
 | `GeminiText` | gemtext: line types, a streaming line parser, a whole-document parser |
 | `GeminiTextWriter` | gemtext written, a line at a time; a name's link percent-encoded |
 | `GeminiServer` | the server engine, from pogemini's `GemServer` (Phase 8) |
@@ -603,14 +604,14 @@ imported later, read-only; gmni's pins certificates, so not.
 
 Decided with the user, 2026-11-18: the library makes them.
 
-- **Made as pogemini's `GemCert` makes a server's**: `/bin/sh` run
-  through pounix's `UnixProcesses` with a fixed script and the
-  arguments as `$1`, `$2`, ..., so nothing is quoted; `openssl genpkey`
-  and `req -x509` with options both OpenSSL 3 and LibreSSL accept,
-  `-sha256` named (LibreSSL signs with SHA-1 otherwise, which GnuTLS
-  refuses); ECDSA P-256 by default; under `umask 077`, written under
-  temporary names and renamed, key first, certificate last. Without
-  `openssl` on `PATH`, an error the program sees.
+- **Made through polibtls's `TlsMake`** (since Phase 10; until then
+  by running `openssl`, as pogemini's `GemCert` then did): an ECDSA
+  P-256 key (`EcKey`, mode 600, refused if the file is there), then a
+  self-signed certificate signed with SHA-256 (`SelfSigned`, mode 644,
+  written under a temporary name and renamed), key first, certificate
+  last, so an interrupted `Make` leaves at most a key, which the next
+  one is given its certificate for. libcrypto, the one libtls loads,
+  does it, so no program is run and nothing needs `openssl` on `PATH`.
 - **An identity** is a name (the file names, and the certificate's
   CN unless given another), a lifetime (the program's; a long one by
   default, since an identity's hash is what a capsule knows a user
@@ -629,8 +630,34 @@ Decided with the user, 2026-11-18: the library makes them.
   keeps the common rule: an identity attached to a host and a path
   prefix is offered for every URL under it (as Lagrange and Amfora
   do), in a file beside the identities.
-- pogemini's `GemCert` could later use the same code; that is
-  pogemini's to decide (Phase 8).
+- ~~pogemini's `GemCert` could later use the same code~~: it does,
+  through `Ensure` (Phase 10, decided with the user, 2026-11-19).
+
+### A server's certificate (`GeminiIdentities.Ensure`)
+
+Moved from pogemini's `GemCert` (Phase 10, decided with the user,
+2026-11-19), so `GeminiServe`, pogemini and any other server make
+theirs the same way.
+
+- **Made once and kept**: `Ensure(dir, name, names, days, ...)` loads
+  `<dir>/<name>.crt` and its key if the certificate is there, and
+  otherwise makes them, the CN the name and the subject alternative
+  names `names` (space-separated DNS names and IP addresses; the name
+  alone if empty), which libtls matches SNI against. A capsule is
+  known by its key, so a server must never replace its certificate
+  unasked: a certificate without its key is refused, not remade, and
+  a key without its certificate is kept and given one, as `Make` does.
+- **The directory** is made if missing, parents included, and given
+  mode 700, as `GemCert` did; one already there keeps its mode, as
+  the user chose it.
+- **The name** is `ValidName`'s, as an identity's, but may hold `:`,
+  since pogemini lets a capsule be named by its IPv6 address (`::1`,
+  kept as `::1.crt`, as `GemCert` did); `Load` still refuses it, as no
+  identity is named so. The lifetime is 1..`MaxDays`, the caller's
+  (pogemini and `GeminiServe` give 3650).
+- `GeminiServe -certs dir` uses it, with the host name (`localhost`
+  when it serves any); `-cert` and `-key` stay, as README's `Hello`
+  and `TestReadme` use them.
 
 ### Halt codes
 
@@ -1064,7 +1091,8 @@ and found:
 - **Identities**: `Make(dir, name, commonName, days, ...)`, the name
   1..64 of letters, digits, `.`, `_`, `-`, not starting with `.`
   (so never a path), the common name printable ASCII without `/`,
-  `\`, `+` or `=` (which `-subj` reads), the days 1..36500,
+  `\`, `+` or `=` (which `-subj` reads; since Phase 10 any printable
+  ASCII up to 64 characters), the days 1..36500,
   `DefaultDays` 7300; the script is `GemCert`'s without a
   subjectAltName and with the CN and days as arguments. Exit 127
   means no `openssl`, checked by the test running itself with `PATH`
@@ -1292,6 +1320,36 @@ fails first if they differ. Running them found that `Get` and
 `Identity` printed an empty line after a body, which already ends its
 lines, that the README didn't show: now a newline follows only what
 the program writes itself.
+
+### Phase 10: certificates through TlsMake [done]
+
+Decided with the user, 2026-11-19: `GeminiIdentities.Make` makes the
+pair through polibtls's `TlsMake` instead of running `openssl`, and
+pogemini's "a server's certificate made once" moves here as
+`GeminiIdentities.Ensure` ("A server's certificate"), for
+`GeminiServe -certs` and pogemini's `GemCert`.
+
+**Done (2026-11-19):** `Make` and `Ensure` on `TlsMake.EcKey` and
+`SelfSigned`; `NotFound` and the script gone, and pounix's
+`UnixProcesses` with them. A common name is now any printable ASCII up
+to 64 characters (X.509's ub-common-name, which `TlsMake` enforces),
+since nothing parses it: `TestIdentities` checks that one holding
+`/CN=` and `+` comes out as one CN. `TestIdentities` runs everywhere,
+not skipping without `openssl`, and run with an empty `PATH` makes an
+identity all the same; it checks `Ensure`: the directory made 700, the
+key 600 and the certificate 644, the names as DNS and IP subject
+alternative names, the same certificate the second time, a
+certificate without its key refused and left, a key without its
+certificate given one, a directory already there keeping its mode, and
+bad arguments refused, and a server named `::1`. `TestRun` checks `GeminiServe -certs`: made,
+served with, and kept. `TestReadme`'s `Identity` no longer skips
+without `openssl`. The tests still use `openssl` to read certificates
+back, as `make-certs.sh` needs it anyway.
+
+`make test` and `make valgrind` pass on Fedora, and `gmake test` on
+alerik, artos, yishana, jherek and cymoril (985 ok, no FAIL, skip or
+assertion), with pogemini's `GemCert` on `Ensure` passing its own tests
+there too.
 
 ## Open questions
 

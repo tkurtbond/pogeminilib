@@ -1,12 +1,14 @@
 MODULE TestIdentities; (* GeminiIdentities: made, listed, used, and scoped *)
 
-(* Identities made with the host's openssl under
+(* Identities made through polibtls's TlsMake under
    build/test-TestIdentities, afresh, and removed at the end: listed
    with their hashes, their files' modes, one presented to
    test/TestServer, which echoes the hash it saw; names that would
-   leave the directory refused; and, run again by itself with PATH
-   empty of openssl ("nossl"), the error saying so. Then the scopes
-   file's rule. Skipped, but for the scopes, where there is no openssl. *)
+   leave the directory refused; and, run again by itself with an empty
+   PATH ("nopath"), made all the same, since no openssl command is
+   run. A server's certificate, kept by Ensure. Then the scopes file's
+   rule. openssl reads the certificates back, as the tests' certificates
+   need it anyway. *)
 
 IMPORT Out, Args, Check, Child, Server, ClientCases, UnixErrors, UnixFiles,
   GeminiUrls, GeminiResponses, GeminiIdentities, GeminiFetch;
@@ -58,6 +60,7 @@ END Presented;
 PROCEDURE Identities;
   VAR id, id2, first: GeminiIdentities.Identity; why: ARRAY 512 OF CHAR;
     out: ARRAY 4096 OF CHAR; opts: GeminiResponses.Options; cmd: ARRAY 256 OF CHAR;
+    cafe: ARRAY 8 OF CHAR;
 BEGIN
   Check.Check(GeminiIdentities.List(Ids, first, why) & (first = NIL),
     "a directory that isn't there holds no identities");
@@ -110,15 +113,24 @@ BEGIN
     & ~GeminiIdentities.Make(Ids, "a b", "", 30, id2, why)
     & ~GeminiIdentities.Load(Ids, "../ids/alice", id2, why),
     "a name that would leave the directory, or isn't a file's, refused");
-  Check.Check(~GeminiIdentities.Make(Ids, "f", "/CN=x", 30, id2, why)
-    & ~GeminiIdentities.Make(Ids, "f", "a=b", 30, id2, why)
-    & ~GeminiIdentities.Make(Ids, "f", "a+b", 30, id2, why),
-    "a common name openssl would read as its own refused");
+  cafe := "cafe"; cafe[3] := 0C3X; cafe[4] := 0A9X; cafe[5] := 0X;
+  Check.Check(~GeminiIdentities.Make(Ids, "f", cafe, 30, id2, why)
+    & ~GeminiIdentities.Make(Ids, "f", "0123456789012345678901234567890123456789012345678901234567890123456789", 30, id2, why),
+    "a common name not printable ASCII, or over 64 characters, refused");
   Check.Check(~GeminiIdentities.Make(Ids, "f", "", 0, id2, why)
     & ~GeminiIdentities.Make(Ids, "f", "", GeminiIdentities.MaxDays + 1, id2, why),
     "a lifetime out of range refused");
   Check.Check(Shell("! ls -a ../build/test-TestIdentities/ids | grep -v -e '^[a-e]' -e '^[.]x[.]crt$' -e '^[.][.]*$'", out) = 0,
     "nothing made by what was refused");
+  Check.Check(GeminiIdentities.Make(Ids, "eve", "a/CN=b+c=d\e", 30, id2, why),
+    "a common name with what openssl's -subj would read as its own, made as it is");
+  cmd := "openssl x509 -noout -subject -nameopt RFC2253 -in ../build/test-TestIdentities/ids/eve.crt";
+  Check.Check((Shell(cmd, out) = 0) & Check.Contains(out, "CN=a/CN"), "... one name, not two");
+  IF Shell("cd ../build/test-TestIdentities/ids && rm eve.crt && cp eve.key eve.key.was", out) = 0 THEN END;
+  Check.Check(GeminiIdentities.Make(Ids, "eve", "", 30, id2, why)
+    & (Shell("cmp -s ../build/test-TestIdentities/ids/eve.key ../build/test-TestIdentities/ids/eve.key.was", out) = 0),
+    "a key without its certificate, as an interrupted Make leaves, given one");
+  IF Shell("cd ../build/test-TestIdentities/ids && rm eve.crt eve.key eve.key.was", out) = 0 THEN END;
 
   IF port > 0 THEN
     GeminiResponses.InitOptions(opts);
@@ -127,10 +139,74 @@ BEGIN
     Check.Check(Presented(opts, id.hash), "with one, the server sees the hash listed")
   END;
 
-  Check.Check((Shell("PATH=/nonexistent; export PATH; exec ../build/TestIdentities nossl", out) = 0)
-    & Check.Contains(out, "isn't on PATH"),
-    "no openssl on PATH: said so")
+  Check.Check((Shell("PATH=/nonexistent; export PATH; exec ../build/TestIdentities nopath", out) = 0)
+    & Check.Contains(out, "made"),
+    "with no PATH, so no openssl, made all the same")
 END Identities;
+
+(* Mode bits of the directory path, -1 if it can't be opened. *)
+PROCEDURE DirMode(path: ARRAY OF CHAR): LONGINT;
+  VAR out: ARRAY 64 OF CHAR; cmd: ARRAY 256 OF CHAR;
+BEGIN
+  cmd := "ls -ld "; ClientCases.Append(cmd, path); ClientCases.Append(cmd, " | cut -c1-10");
+  IF Shell(cmd, out) # 0 THEN RETURN -1 END;
+  IF out[0] # "d" THEN RETURN -2 END;
+  IF Check.Contains(out, "drwx------") THEN RETURN 1C0H END;
+  RETURN 0
+END DirMode;
+
+(* Ensure: a server's certificate, made once and kept. *)
+PROCEDURE Servers;
+  CONST Certs = "../build/test-TestIdentities/certs/sub";
+  VAR id, id2: GeminiIdentities.Identity; why: ARRAY 512 OF CHAR; out: ARRAY 4096 OF CHAR;
+    cmd: ARRAY 256 OF CHAR;
+BEGIN
+  Check.Check(GeminiIdentities.Ensure(Certs, "localhost", "localhost 127.0.0.1 ::1", 3650, id, why)
+    & (id.name = "localhost") & Check.Contains(id.hash, "SHA256:")
+    & (id.notAfter - id.notBefore >= 3649 * 86400) & (id.notAfter - id.notBefore <= 3651 * 86400),
+    "Ensure: a server's certificate made, in a directory made for it");
+  IF id = NIL THEN Out.String("  "); Out.String(why); Out.Ln; RETURN END;
+  Check.Check((DirMode(Certs) = 1C0H) & (ModeOf(id.keyFile) = 180H) & (ModeOf(id.certFile) = 1A4H),
+    "  ... the directory its owner's only, the key 600, the certificate 644");
+  cmd := "openssl x509 -noout -text -in ../build/test-TestIdentities/certs/sub/localhost.crt";
+  Check.Check((Shell(cmd, out) = 0) & Check.Contains(out, "DNS:localhost")
+    & Check.Contains(out, "IP Address:127.0.0.1") & Check.Contains(out, "CN"),
+    "  ... for its names, DNS and IP alike");
+  Check.Check(GeminiIdentities.Ensure(Certs, "localhost", "other.example", 30, id2, why)
+    & (id2.hash = id.hash) & (id2.notAfter = id.notAfter),
+    "  ... kept: the next time, the same one");
+  Check.Check(GeminiIdentities.Ensure(Certs, "plain.example", "", 30, id2, why)
+    & (Shell("openssl x509 -noout -text -in ../build/test-TestIdentities/certs/sub/plain.example.crt | grep -q DNS:plain.example", out) = 0),
+    "no names given: its own name");
+  IF Shell("cd ../build/test-TestIdentities/certs/sub && mv localhost.key held.key && cp held.key k.key", out) = 0 THEN END;
+  Check.Check(~GeminiIdentities.Ensure(Certs, "localhost", "", 30, id2, why) & Check.Contains(why, "no key"),
+    "a certificate without its key: refused");
+  Check.Check(Shell("test -f ../build/test-TestIdentities/certs/sub/localhost.crt && test ! -f ../build/test-TestIdentities/certs/sub/localhost.key", out) = 0,
+    "  ... and not replaced");
+  Check.Check(GeminiIdentities.Ensure(Certs, "k", "k.example", 30, id2, why)
+    & (Shell("cmp -s ../build/test-TestIdentities/certs/sub/k.key ../build/test-TestIdentities/certs/sub/held.key", out) = 0),
+    "a key without its certificate: given one, the key kept");
+  Check.Check(GeminiIdentities.Ensure(Certs, "::1", "", 30, id2, why) & (id2.name = "::1")
+    & (Shell("openssl x509 -noout -text -in ../build/test-TestIdentities/certs/sub/::1.crt | grep -q 'IP Address:0:0:0:0:0:0:0:1'", out) = 0)
+    & GeminiIdentities.Ensure(Certs, "::1", "", 30, id, why) & (id.hash = id2.hash),
+    "a server named by its IPv6 address: made, and kept");
+  Check.Check(~GeminiIdentities.Make(Ids, "a:b", "", 30, id2, why) & ~GeminiIdentities.Load(Certs, "::1", id2, why),
+    "  ... though no identity's name holds ':'");
+  IF Shell("mkdir -m 755 ../build/test-TestIdentities/open", out) = 0 THEN END;
+  Check.Check(GeminiIdentities.Ensure("../build/test-TestIdentities/open", "x", "", 30, id2, why)
+    & (DirMode("../build/test-TestIdentities/open") = 0),
+    "a directory that is there keeps its mode");
+  Check.Check(~GeminiIdentities.Ensure("../build/test-TestIdentities/certs/sub/k.key/certs", "x", "", 30, id2, why)
+    & Check.Contains(why, "can't make the certificate directory"),
+    "a directory that can't be made: said so");
+  Check.Check(~GeminiIdentities.Ensure(Certs, "../x", "", 30, id2, why)
+    & ~GeminiIdentities.Ensure(Certs, "x", "", 0, id2, why)
+    & ~GeminiIdentities.Ensure("", "x", "", 30, id2, why)
+    & ~GeminiIdentities.Ensure(Certs, "y", "not_a_name!", 30, id2, why) & (id2 = NIL),
+    "a bad name, lifetime, directory or subject alternative name: refused");
+  Check.Check(Shell("test ! -f ../build/test-TestIdentities/certs/sub/y.crt", out) = 0,
+    "  ... leaving no certificate")
+END Servers;
 
 PROCEDURE Url(s: ARRAY OF CHAR; VAR u: GeminiUrls.URL);
   VAR why: ARRAY 128 OF CHAR;
@@ -214,29 +290,27 @@ BEGIN
   END
 END Scopes;
 
-PROCEDURE NoSsl;
+PROCEDURE NoPath;
   VAR id: GeminiIdentities.Identity; why: ARRAY 512 OF CHAR;
 BEGIN
-  IF GeminiIdentities.Make(Ids, "nossl", "", 30, id, why) THEN Out.String("made")
+  IF GeminiIdentities.Make(Ids, "nopath", "", 30, id, why) THEN Out.String("made")
   ELSE Out.String(why)
   END;
   Out.Ln
-END NoSsl;
+END NoPath;
 
 PROCEDURE Main;
   VAR arg: ARRAY 16 OF CHAR; out: ARRAY 4096 OF CHAR;
 BEGIN
   IF Args.argc = 2 THEN Args.Get(1, arg) ELSE arg := "" END;
-  IF arg = "nossl" THEN NoSsl; RETURN END;
+  IF arg = "nopath" THEN NoPath; RETURN END;
   IF Shell("rm -rf ../build/test-TestIdentities && mkdir ../build/test-TestIdentities", out) # 0 THEN
     Check.Check(FALSE, "making the test's directory")
   ELSE
-    IF Shell("command -v openssl", out) = 0 THEN
-      port := Server.Start();
-      Identities;
-      IF port > 0 THEN Server.Stop END
-    ELSE Check.Skip("identities: no openssl here")
-    END;
+    port := Server.Start();
+    Identities;
+    IF port > 0 THEN Server.Stop END;
+    Servers;
     Scopes;
     IF Shell("rm -rf ../build/test-TestIdentities", out) # 0 THEN END
   END;

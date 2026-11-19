@@ -46,8 +46,9 @@ the BSDs), the client's and server's tests under valgrind on Linux, and
   poc: poDateTime, posockets, polibtls and pounix. `make deps` checks.
   polibtls needs libtls: LibreSSL's, or libretls on OpenSSL.
 - Linux, FreeBSD, NetBSD or OpenBSD; GNU make, as `gmake` on the BSDs.
-- `openssl` on `PATH` for `GeminiIdentities.Make` (it makes a
-  certificate, which libtls can't), and for the tests' certificates.
+- `openssl` on `PATH` for the tests' certificates only:
+  `GeminiIdentities` makes keys and certificates through polibtls's
+  `TlsMake`, with the libcrypto libtls loads.
 - valgrind, for `make valgrind` (Linux); python3 for `make doc`.
 
 ## Building and installing
@@ -437,6 +438,11 @@ END Identity.
 That run was against `examples/GeminiServe`, whose page shows the
 client certificate's hash: the one the identity has.
 
+A server's own certificate is made once and kept by
+`GeminiIdentities.Ensure(dir, name, names, days, id, why)`: the next
+time it loads the same one, since a capsule is known by its key, and a
+certificate whose key is missing is refused rather than replaced.
+
 ### A server: `GeminiServer`
 
 The engine serves each connection in a task of its own, within a
@@ -497,7 +503,9 @@ END Hello.
 <!-- end program -->
 
 `examples/GeminiServe.Mod` adds a log, an input prompt, and checking
-that the host and port asked for are the server's own.
+that the host and port asked for are the server's own; given `-certs
+dir` instead of `-cert` and `-key`, it makes its certificate there
+through `Ensure`.
 
 ## Errors and halts
 
