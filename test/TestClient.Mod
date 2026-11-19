@@ -117,7 +117,7 @@ BEGIN
     Check.Check(TRUE, "pogemini isn't installed: its checks skipped");
     RETURN
   END;
-  ok := Shell("rm -rf ../build/test-client && mkdir -p ../build/test-client && printf '# Hello\n' > ../build/test-client/index.gmi && head -c 100000 /dev/zero | tr '\000' x > ../build/test-client/big.txt") = 0;
+  ok := Shell("rm -rf ../build/test-client && mkdir -p ../build/test-client && printf '# Hello\n' > ../build/test-client/index.gmi && dd if=/dev/zero bs=1000 count=100 2>/dev/null | tr '\000' x > ../build/test-client/big.txt && test $(wc -c < ../build/test-client/big.txt) -eq 100000") = 0;
   Check.Check(ok, "the files for pogemini made");
   ok := ok & Child.Spawn("exec pogemini -listen 127.0.0.1 -port 0 -host localhost -n 3 -deadline 5000 -root ../build/test-client -cert ../build/certs/server-ec.crt -key ../build/certs/server-ec.key",
       "", 0, c)
