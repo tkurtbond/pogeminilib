@@ -515,14 +515,12 @@ BEGIN
   RETURN FALSE
 END Detach;
 
-(* The name of the identity to offer for url, in name: the one attached
-   to its host and port and the longest path that it is, or is below;
-   FALSE, name "", if there is none. *)
-PROCEDURE (s: Scopes) For*(VAR url: GeminiUrls.URL; VAR name: ARRAY OF CHAR): BOOLEAN;
+(* The attachment that covers url: the one to its host and port at the
+   longest path that url's is, or is below; NIL if none. *)
+PROCEDURE Best(s: Scopes; VAR url: GeminiUrls.URL): Line;
   VAR key: ARRAY MaxKey OF CHAR; path: GeminiUrls.Text; l, best: Line;
 BEGIN
-  name[0] := 0X;
-  IF ~Where(url, key, path) THEN RETURN FALSE END;
+  IF ~Where(url, key, path) THEN RETURN NIL END;
   best := NIL; l := s.first;
   WHILE l # NIL DO
     IF l.entry & (l.key = key) & Under(path, l.path)
@@ -531,9 +529,34 @@ BEGIN
     END;
     l := l.next
   END;
+  RETURN best
+END Best;
+
+(* The name of the identity to offer for url, in name: the one attached
+   to its host and port and the longest path that it is, or is below;
+   FALSE, name "", if there is none. *)
+PROCEDURE (s: Scopes) For*(VAR url: GeminiUrls.URL; VAR name: ARRAY OF CHAR): BOOLEAN;
+  VAR best: Line;
+BEGIN
+  name[0] := 0X;
+  best := Best(s, url);
   IF best = NIL THEN RETURN FALSE END;
   COPY(best.name, name);
   RETURN TRUE
 END For;
+
+(* As For, and the path the identity is attached at, in path, which url's
+   is or is below: for a program to detach it from a page beneath (with
+   url's host and port and that path), or to say where it applies.
+   FALSE, both "", if none covers url. *)
+PROCEDURE (s: Scopes) Covering*(VAR url: GeminiUrls.URL; VAR name, path: ARRAY OF CHAR): BOOLEAN;
+  VAR best: Line;
+BEGIN
+  name[0] := 0X; path[0] := 0X;
+  best := Best(s, url);
+  IF best = NIL THEN RETURN FALSE END;
+  COPY(best.name, name); COPY(best.path, path);
+  RETURN TRUE
+END Covering;
 
 END GeminiIdentities.

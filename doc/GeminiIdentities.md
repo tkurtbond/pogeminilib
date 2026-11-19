@@ -132,3 +132,11 @@ PROCEDURE (s: Scopes) For*(VAR url: GeminiUrls.URL; VAR name: ARRAY OF CHAR): BO
 ```
 
 The name of the identity to offer for url, in name: the one attached to its host and port and the longest path that it is, or is below; FALSE, name "", if there is none.
+
+#### Covering
+
+```oberon
+PROCEDURE (s: Scopes) Covering*(VAR url: GeminiUrls.URL; VAR name, path: ARRAY OF CHAR): BOOLEAN;
+```
+
+As For, and the path the identity is attached at, in path, which url's is or is below: for a program to detach it from a page beneath (with url's host and port and that path), or to say where it applies. FALSE, both "", if none covers url.

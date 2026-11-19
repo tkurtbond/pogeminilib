@@ -28,6 +28,15 @@ MODULE TestServer; (* a Gemini server that misbehaves on purpose, for the client
      /r/to?LOC     30 LOC, the query as it came
      /r/self       30 /r/self, a loop
      /r/chain/N    30 /r/chain/N-1, N redirects before 20 "chain end"
+     /page         20, a gemtext page with a line of each kind, for
+                   examples/GeminiBrowse
+     /ask, /secret 10 or 11 ("ask?" or "secret?"); with a query, 20 and
+                   "answer " and the query, as it came
+     /private      60 without a client certificate; with one, 20 and
+                   "hello " and its fingerprint
+     /plain        20 text/plain, "plain text"
+     /latin1       20 text/plain in ISO-8859-1
+     /bin          20 application/octet-stream, "abcde"
      anything else 20 text/gemini, and lines "url" (the request's URL),
                    "sni" (the name the client sent, or "-") and "cert"
                    (its certificate's fingerprint, or "-")
@@ -73,6 +82,10 @@ BEGIN
   IF i < LEN(s) - 1 THEN s[i] := c; INC(i) END;
   s[i] := 0X
 END Put;
+
+PROCEDURE Line(VAR s: ARRAY OF CHAR; VAR i: LONGINT; part: ARRAY OF CHAR);
+BEGIN Append(s, i, part); Put(s, i, LF)
+END Line;
 
 PROCEDURE CrLf(VAR s: ARRAY OF CHAR; VAR i: LONGINT);
 BEGIN Put(s, i, CR); Put(s, i, LF)
@@ -189,6 +202,36 @@ BEGIN
     IF j = 0 THEN Append(t^, i, "20 text/gemini"); CrLf(t^, i); Append(t^, i, "chain end")
     ELSE Append(t^, i, "30 /r/chain/"); Int(t^, i, j - 1); CrLf(t^, i)
     END
+  ELSIF path = "/page" THEN
+    Append(t^, i, "20 text/gemini"); CrLf(t^, i);
+    Line(t^, i, "# A page");
+    Line(t^, i, "A paragraph long enough to be wrapped at a narrow width, with words to break between.");
+    Line(t^, i, "=> /ask Ask something");
+    Line(t^, i, "=> /r/chain/1");
+    Line(t^, i, "=> https://example.org/ Elsewhere");
+    Line(t^, i, "=>");
+    Line(t^, i, "* an item");
+    Line(t^, i, "> a quote");
+    Line(t^, i, "```alt text");
+    Line(t^, i, "  preformatted,   kept as it is, however long it goes on for, past any width");
+    Line(t^, i, "```");
+    Line(t^, i, "## Below");
+    Line(t^, i, "=> plain Plain text")
+  ELSIF (path = "/ask") OR (path = "/ask?") THEN Append(t^, i, "10 ask?"); CrLf(t^, i)
+  ELSIF (path = "/secret") OR (path = "/secret?") THEN Append(t^, i, "11 secret?"); CrLf(t^, i)
+  ELSIF StartsWith(path, "/ask?") OR StartsWith(path, "/secret?") THEN
+    Append(t^, i, "20 text/gemini"); CrLf(t^, i); Append(t^, i, "answer "); j := 0;
+    WHILE path[j] # "?" DO INC(j) END;
+    INC(j); WHILE path[j] # 0X DO Put(t^, i, path[j]); INC(j) END;
+    Put(t^, i, LF)
+  ELSIF path = "/private" THEN
+    s := c.PeerCertHash();
+    IF s = NIL THEN Append(t^, i, "60 who are you?"); CrLf(t^, i)
+    ELSE Append(t^, i, "20 text/gemini"); CrLf(t^, i); Append(t^, i, "hello "); Line(t^, i, s^)
+    END
+  ELSIF path = "/plain" THEN Append(t^, i, "20 text/plain"); CrLf(t^, i); Line(t^, i, "plain text")
+  ELSIF path = "/latin1" THEN Append(t^, i, "20 text/plain; charset=iso-8859-1"); CrLf(t^, i); Line(t^, i, "caf")
+  ELSIF path = "/bin" THEN Append(t^, i, "20 application/octet-stream"); CrLf(t^, i); Append(t^, i, "abcde")
   ELSIF StartsWith(path, "/status/") & (path[8] # 0X) & (path[9] # 0X) THEN
     Put(t^, i, path[8]); Put(t^, i, path[9]); Append(t^, i, " status ");
     Put(t^, i, path[8]); Put(t^, i, path[9]); CrLf(t^, i)

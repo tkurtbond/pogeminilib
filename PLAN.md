@@ -116,7 +116,8 @@ change until the library is settled.
   `openssl` for client certificates (`GeminiIdentities`), so a
   dependency from Phase 5; `UnixFiles` for writing the trust store
   safely (a temporary name, then `rename`) and what else a file needs
-  beyond poc's `Files`.
+  beyond poc's `Files`; `UnixTerminals` for the example browser's
+  secret input (Phase 6).
 - **poc's runtime**: `Tasks`, `Out`, `Err`, `Args`, `Platform`,
   `StopRequests` (the server engine, Phase 8).
 - **pogemini**: `GemRequest` (URL rules, already tested by 82 checks in
@@ -1042,6 +1043,54 @@ and found:
 for 1x, back, the trust store), showing how the modules fit together,
 and finding what an API lacks before it is installed for others. Not
 installed, as polibtls's examples aren't.
+
+Started 2026-11-18. The browser reads a command a line from standard
+input (`<n>`, `g`, `b`, `r`, `p`, `l`, `i`, `trust`, `save`, `id`,
+`id new`, `id use`, `id off`, `q`), and when that isn't a terminal it
+echoes each after its prompt, so a test's transcript reads as a
+session. `TestBrowse` drives it so, against new pages on `TestServer`
+(`/page`, a line of each kind; `/ask`, `/secret`; `/private`, 60
+without a certificate; `/plain`, `/latin1`, `/bin`).
+
+What it found:
+
+- **Where an identity is attached**: `Scopes.For` says which identity
+  covers a URL but not at what path, which `id off` on a page beneath
+  needs for `Detach`. Added `Scopes.Covering`, with checks in
+  `TestIdentities`.
+- **Trusting a changed key** needs the store's own name for the host:
+  the program repeats `GeminiPunycode.ToAscii(r.url.host)` and
+  `GeminiUrls.Port`, as `GeminiResponses` does. It works; it is a
+  second place that must agree with the first. A field on `Response`
+  (the host as the store knows it) would end that; not added yet.
+- **Input not echoed (status 11)**: the library had no call to turn a
+  terminal's echo off, and the browser ran `stty -echo` through
+  `UnixProcesses`. pounix gained `UnixTerminals` for it (its Phase 10:
+  `IsTerminal`, `Echo`, `SetEcho`, and `OpenPseudo` for tests), and
+  `ReadSecret` uses `SetEcho`, saying so first if echo won't go off.
+  Checked by hand in a terminal (tmux), 2026-11-18: the answer not
+  shown, echo back on after. `TestBrowse` can't check it, since
+  `Child` gives the browser pipes, not a terminal. What is typed
+  before the prompt appears was echoed as it came (pounix's `TCSANOW`).
+- **A gemtext quote keeps the whitespace after `>`** (by design, as
+  GeminiText says), so a program showing it as "> " plus the text
+  doubles the space; the browser leaves out its own space then. A link
+  with no URL (`noUrl`) has no text either; the browser leaves it out.
+- **`-identities` for a directory not there**: `OpenScopes` and
+  `List` both take a missing file or directory for none yet, so the
+  browser checks with `UnixFiles.OpenDirectory` itself.
+- **memcheck, open, to investigate later** (the user, 2026-11-18:
+  leave it open for now): `make valgrind` is clean, `TestBrowse` with it,
+  but that doesn't follow the browser, its child. Run directly under
+  memcheck through a scripted session, the browser shows 2 "use of
+  uninitialised value of size 8" in `GarbageCollectedHeap.DrainMarkStack`,
+  the value from a stack allocation in `GeminiBrowse.Visit`; no leaks,
+  no descriptors left open. Deterministic, and it takes the session
+  `l`, `1`, `hello` (an input page), `b`, `2` (a redirect); any part
+  alone shows none. Not explained yet. Ruled out by experiment: Visit's
+  character arrays (cleared, no change), its pointer locals `p` and
+  `r` (set to NIL, no change), and the whole-record copy `p.url :=
+  r.url` (a field-by-field copy, no change).
 
 ### Phase 7: the BSDs
 

@@ -147,7 +147,7 @@ END For;
 
 PROCEDURE Scopes;
   VAR s, t: GeminiIdentities.Scopes; why: ARRAY 512 OF CHAR; u: GeminiUrls.URL;
-    out: ARRAY 4096 OF CHAR; ok: BOOLEAN;
+    out: ARRAY 4096 OF CHAR; ok: BOOLEAN; name: ARRAY 80 OF CHAR; path: GeminiUrls.Text;
 BEGIN
   Check.Check(GeminiIdentities.OpenScopes("../build/test-TestIdentities/scopes", s, why),
     "a scopes file that isn't there yet: none");
@@ -184,6 +184,11 @@ BEGIN
   Check.Check(ok & For(t, "gemini://example.org/app/admin/x", "bob") & For(t, "gemini://example.org/app/x", "frank")
     & For(t, "gemini://xn--bcher-kva.example/", "dave") & For(t, "gemini://[::1]:1966/", "erin"),
     "read back from its file");
+  Url("gemini://example.org/app/admin/x?q", u);
+  Check.Check(ok & t.Covering(u, name, path) & (name = "bob") & (path = "/app/admin/"),
+    "Covering: the identity and the path it is attached at");
+  Url("gemini://example.org:1966/", u);
+  Check.Check(ok & ~t.Covering(u, name, path) & (name = "") & (path = ""), "... none: both empty");
   Url("gemini://example.org/app/admin/", u);
   Check.Check(ok & t.Detach(u, why) & For(t, "gemini://example.org/app/admin/x", "frank"),
     "one detached: the next longest offered");

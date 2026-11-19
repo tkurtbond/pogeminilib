@@ -78,10 +78,10 @@ LIBPATH := -library-path $(LIBDIR) -library-path $(POCLIBDIR)
 LIBSRC := $(LIBMODS:%=src/%.Mod)
 LIBSTAMP := $(if $(LIBMODS),$(LIBDIR)/$(LIBRARY)-OC.stamp)
 # Test programs (test/<name>.Mod, each a main module), run from test/.
-TESTS := TestCheck TestPunycode TestUrls TestText TestHeaders TestTrust TestRedirects TestIdentities TestFetch TestClient
+TESTS := TestCheck TestPunycode TestUrls TestText TestHeaders TestTrust TestRedirects TestIdentities TestFetch TestClient TestBrowse
 # The client's tests: their shared modules, the server they run, and its
 # certificates.
-CLIENTTESTS := TestTrust TestRedirects TestIdentities TestFetch TestClient
+CLIENTTESTS := TestTrust TestRedirects TestIdentities TestFetch TestClient TestBrowse
 CLIENTDEPS := test/ClientCases.Mod test/Server.Mod test/Child.Mod $(BUILD)/TestServer $(CERTS)/.stamp
 # Programs that must halt (test/<name>.Mod), as name:Assert-code. poc's
 # ASSERT(x, n) prints "assertion failed (n)" on standard error and exits
@@ -94,7 +94,7 @@ ASSERTSTATUS := 10
 
 # Example programs (examples/<name>.Mod), not installed; the client's
 # tests run them.
-EXAMPLES := GeminiGet GeminiFetchAll
+EXAMPLES := GeminiGet GeminiFetchAll GeminiBrowse
 
 TESTBINS := $(TESTS:%=$(BUILD)/%)
 EXAMPLEBINS := $(EXAMPLES:%=$(BUILD)/%)
