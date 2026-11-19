@@ -26,6 +26,12 @@ MODULE GeminiServer; (* A Gemini server's engine: listeners, and a task per conn
    failed, and stopping on a signal. What a line of log looks like, and
    whether it has the time, is the program's.
 
+   A program may refuse a client by its address (SetAdmit): its
+   Admitter is asked as each connection is accepted, before the TLS
+   handshake, and a client it refuses is closed at once, unanswered,
+   and logged as refused. It runs in the accept task, so it must not
+   wait.
+
    At most a server's limit of connections are served at once
    (SetLimit); at the limit, the next waits in the kernel's queue until
    one ends.
@@ -56,6 +62,9 @@ CONST
   stopping* = 3;      (* a signal (s.signal) stops the server; s.active
                          connections are still in progress *)
   stopped* = 4;       (* they have ended, and Serve is returning *)
+  refused* = 5;       (* x's client refused by the Admitter (SetAdmit),
+                         its connection closed before the handshake;
+                         x has only its peer *)
 
   Tick = 200;          (* ms an accept waits before looking at stop *)
   Linger = 2000;       (* ms a closed connection is drained for *)
@@ -90,10 +99,14 @@ TYPE
   Responder* = PROCEDURE (x: Exchange);
 
   (* Told what happens (served .. stopped), in the task it happens in:
-     x for served and failed, NIL otherwise; why for failed and
+     x for served, failed and refused, NIL otherwise; why for failed and
      acceptFailed, "" otherwise. It should write a line of log without
      waiting between its parts, so the lines of tasks never mix. *)
   Logger* = PROCEDURE (s: Server; event: INTEGER; x: Exchange; why-: ARRAY OF CHAR);
+
+  (* Whether the client at peer may be served: asked in the accept task,
+     before the handshake, so it must not wait. *)
+  Admitter* = PROCEDURE (s: Server; peer-: Sockets.Address): BOOLEAN;
 
   (* Writes gemtext to an exchange's body, after its 2x header. *)
   Writer* = POINTER TO WriterDesc;
@@ -119,6 +132,7 @@ TYPE
     ctx: Tls.Context;
     respond: Responder;
     log: Logger;              (* NIL: nothing told *)
+    admit: Admitter;          (* NIL: every client served *)
     deadline: LONGINT;
     limit: LONGINT;           (* connections at once, at most *)
     ended: Tasks.Condition;   (* signalled as each connection ends *)
@@ -203,14 +217,22 @@ BEGIN
   END
 END ReadRequest;
 
+(* A new exchange with s, for a client at peer. *)
+PROCEDURE NewExchange(s: Server; peer: Sockets.Address): Exchange;
+  VAR x: Exchange;
+BEGIN
+  NEW(x); x.server := s; x.peer := peer; x.request[0] := 0X; x.status := 0;
+  x.failed := FALSE; x.certHash := NIL; x.notBefore := -1; x.notAfter := -1;
+  RETURN x
+END NewExchange;
+
 (* Serves one connection: handshake, request, response, close_notify,
    all within the server's deadline; then tells the Logger how it went. *)
 PROCEDURE (h: Handler) Run*;
   VAR x: Exchange; ok, closed: BOOLEAN; s: Server;
 BEGIN
   s := h.server; closed := FALSE;
-  NEW(x); x.server := s; x.peer := h.peer; x.request[0] := 0X; x.status := 0;
-  x.failed := FALSE; x.certHash := NIL; x.notBefore := -1; x.notAfter := -1;
+  x := NewExchange(s, h.peer);
   IF ~s.ctx.AcceptSocket(h.s.fd, x.conn) THEN
     Log(s, failed, x, s.ctx.error.text^)
   ELSE
@@ -286,9 +308,16 @@ BEGIN
     Sockets.SetDeadline(a.l, Tick);
     IF Stopping() THEN s.stop := TRUE
     ELSIF SocketTasks.Accept(a.l, h.s, h.peer, err) THEN
-      Prune(s);
-      h.next := s.handlers; s.handlers := h; INC(s.active);
-      Tasks.Start(h, TlsTasks.stackSize);
+      IF (s.admit # NIL) & ~s.admit(s, h.peer) THEN
+        (* closed unread: the client's handshake ends at EOF, or by a
+           reset if its ClientHello was already here (TestServe saw
+           "unexpected eof"); either refuses it as well as an alert *)
+        Sockets.Close(h.s); Log(s, refused, NewExchange(s, h.peer), "")
+      ELSE
+        Prune(s);
+        h.next := s.handlers; s.handlers := h; INC(s.active);
+        Tasks.Start(h, TlsTasks.stackSize)
+      END;
       INC(s.accepted);
       IF s.accepted = s.count THEN s.stop := TRUE END
     ELSIF err.kind # Sockets.timedOut THEN
@@ -304,7 +333,7 @@ END Run;
    respond: for a program's extension of ServerDesc, which New is not. *)
 PROCEDURE Init*(s: Server; ctx: Tls.Context; respond: Responder);
 BEGIN
-  s.ctx := ctx; s.respond := respond; s.log := NIL; s.deadline := DefaultDeadline;
+  s.ctx := ctx; s.respond := respond; s.log := NIL; s.admit := NIL; s.deadline := DefaultDeadline;
   s.n := 0; s.port := 0; s.count := 0; s.accepted := 0; s.stop := FALSE;
   s.limit := DefaultLimit; s.active := 0; s.signal := 0;
   s.handlers := NIL
@@ -320,6 +349,11 @@ END New;
 PROCEDURE (s: Server) SetLog*(log: Logger);
 BEGIN s.log := log
 END SetLog;
+
+(* Who is served, NIL for every client (as at first); see Admitter. *)
+PROCEDURE (s: Server) SetAdmit*(admit: Admitter);
+BEGIN s.admit := admit
+END SetAdmit;
 
 (* Each connection's time, handshake to close_notify, in ms. *)
 PROCEDURE (s: Server) SetDeadline*(ms: LONGINT);
@@ -366,8 +400,8 @@ BEGIN
   s.n := 0
 END Close;
 
-(* Serves count connections (0: until a signal stops it), then waits for
-   them to end, having closed the listeners. Call it from the program's
+(* Serves count connections, refused ones included (0: until a signal
+   stops it), then waits for them to end, having closed the listeners. Call it from the program's
    main body: it runs every task. A signal caught since Listen stops it
    at once. Halts (133) unless listening. *)
 PROCEDURE (s: Server) Serve*(count: LONGINT);

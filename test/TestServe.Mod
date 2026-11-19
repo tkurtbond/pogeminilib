@@ -10,7 +10,9 @@ MODULE TestServe; (* GeminiServer, in GeminiServe, against a raw client *)
    a third and must be dropped at the server's deadline. Then the
    server, told how many connections to serve, must exit 0 with a line
    in its log, by its Logger, for each. Once more with an RSA key
-   pair. First, in this process, a server that listens and closes.
+   pair. First, in this process, a server that listens and closes, and
+   one whose Admitter refuses IPv4: a client over 127.0.0.1 gets no
+   handshake, one over ::1 its page, and the log has each.
    Last, gmni (BearSSL; $GMNI or gmni on PATH, skipped without one),
    with an RSA client certificate over IPv4, trusting the server
    (-j always), then an EC one over IPv6, requiring that trust (-j
@@ -35,11 +37,14 @@ CONST
 TYPE
   Test = POINTER TO RECORD (Tasks.TaskDesc) port: INTEGER END;
   Rsa = POINTER TO RECORD (Tasks.TaskDesc) port: INTEGER END;
+  Admitted = POINTER TO RECORD (Tasks.TaskDesc) port: INTEGER END;
 
 VAR
   hash: ARRAY 128 OF CHAR;  (* client1-ec.crt's, as the log gives it *)
   home: ARRAY 64 OF CHAR;   (* gemini://localhost:<the server's port>/ *)
   longest: ARRAY 1100 OF CHAR;  (* a URL of 1024 bytes, the most there may be *)
+  asked: ARRAY 256 OF CHAR;    (* the peers Admit was asked about, one a line *)
+  events: ARRAY 1024 OF CHAR;  (* what AdmitLog was told, one a line *)
 
 PROCEDURE Length(s: ARRAY OF CHAR): LONGINT;
   VAR n: LONGINT;
@@ -278,6 +283,66 @@ BEGIN
   Check.Check(TRUE, "Close: again, nothing")
 END Close;
 
+PROCEDURE AppendLine(VAR s: ARRAY OF CHAR; t: ARRAY OF CHAR);
+  VAR nl: ARRAY 2 OF CHAR;
+BEGIN nl[0] := LF; nl[1] := 0X; Append(s, t); Append(s, nl)
+END AppendLine;
+
+(* Refuses IPv4 clients. *)
+PROCEDURE Admit(s: GeminiServer.Server; peer-: Sockets.Address): BOOLEAN;
+BEGIN
+  AppendLine(asked, peer.host);
+  RETURN peer.family # Sockets.inet
+END Admit;
+
+(* Records an event and its client as "<event> <peer>". *)
+PROCEDURE AdmitLog(s: GeminiServer.Server; event: INTEGER; x: GeminiServer.Exchange; why-: ARRAY OF CHAR);
+  VAR n: ARRAY 64 OF CHAR;
+BEGIN
+  n[0] := CHR(ORD("0") + event); n[1] := " "; n[2] := 0X;
+  IF x # NIL THEN Append(n, x.peer.host) END;
+  AppendLine(events, n)
+END AdmitLog;
+
+PROCEDURE (t: Admitted) Run*;
+  VAR r: RawClient.Response;
+BEGIN
+  r := Fetch("127.0.0.1", t.port, "gemini://localhost/", "", "");
+  Check.Check(~r.ok & (r.len = 0), "Admitter: a refused client (127.0.0.1) gets nothing");
+  IF r.ok OR (r.len # 0) THEN Out.String("  got: "); Out.String(r.data^); Out.Ln END;
+  Expect(Fetch("::1", t.port, "gemini://localhost/", "", ""), "51 not found",
+    "Admitter: an admitted client (::1) is answered")
+END Run;
+
+(* A server whose Admitter refuses IPv4, serving two connections. *)
+PROCEDURE Admitter;
+  VAR s: GeminiServer.Server; c: Tls.Config; ctx: Tls.Context; err: Sockets.Error;
+    t: Admitted; want: ARRAY 64 OF CHAR;
+BEGIN
+  c := Tls.NewConfig(); ctx := Tls.NewServer();
+  IF ~c.SetKeypairFile("../build/certs/self-ec.crt", "../build/certs/self-ec.key")
+    OR ~ctx.Configure(c) THEN
+    Check.Check(FALSE, "Admitter: the server's context"); RETURN
+  END;
+  c.Close;
+  s := GeminiServer.New(ctx, NotFound);
+  s.SetLog(AdmitLog); s.SetAdmit(Admit);
+  IF ~s.Listen("", 0, err) THEN
+    Check.Check(FALSE, "Admitter: the server listens"); Out.String("  "); Out.String(err.text); Out.Ln;
+    RETURN
+  END;
+  asked := ""; events := "";
+  NEW(t); t.port := s.port; Tasks.Start(t, StackSize);
+  s.Serve(2); Tasks.Join(t);
+  want := ""; AppendLine(want, "127.0.0.1"); AppendLine(want, "::1");
+  Check.Check(asked = want, "Admitter: asked once for each client, with its address");
+  IF asked # want THEN Out.String("  asked: "); Out.String(asked) END;
+  want := ""; AppendLine(want, "5 127.0.0.1"); AppendLine(want, "0 ::1");
+  Check.Check(events = want, "Admitter: logged refused (127.0.0.1), then served (::1), nothing else");
+  IF events # want THEN Out.String("  events: "); Out.String(events) END;
+  ctx.Close
+END Admitter;
+
 (* Runs gmni with opts, for home: it must exit 0, with the page naming
    the certificate whose hash is h. *)
 PROCEDURE Gmni1(gmni, opts, h, label: ARRAY OF CHAR);
@@ -331,6 +396,7 @@ PROCEDURE Main;
     log: ARRAY 65536 OF CHAR; line: ARRAY 1200 OF CHAR;
 BEGIN
   Close;
+  Admitter;
   Hash("client1-ec", hash);
   IF ~Start("ec", Count, c, port) THEN
     Check.Check(FALSE, "the server starts and says its port");

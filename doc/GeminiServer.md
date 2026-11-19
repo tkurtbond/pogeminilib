@@ -10,6 +10,8 @@ What the request means, and whether it is allowed (GeminiUrls. CheckRequest; the
 
 The server tells the program what happens through its Logger, if it has one (SetLog): a connection served or failed, an accept that failed, and stopping on a signal. What a line of log looks like, and whether it has the time, is the program's.
 
+A program may refuse a client by its address (SetAdmit): its Admitter is asked as each connection is accepted, before the TLS handshake, and a client it refuses is closed at once, unanswered, and logged as refused. It runs in the accept task, so it must not wait.
+
 At most a server's limit of connections are served at once (SetLimit); at the limit, the next waits in the kernel's queue until one ends.
 
 SIGTERM or SIGINT stops it cleanly: it stops accepting, closes its listeners, so that a new client is refused at once, and waits for the connections in progress, which their deadline bounds. A second signal of the same kind ends it at once. The signals are caught by poc's StopRequests, from Listen on.
@@ -30,6 +32,7 @@ failed* = 1;        (* x's connection failed, why says how; x.request
 acceptFailed* = 2;  (* accepting a connection failed (why); the server
 stopping* = 3;      (* a signal (s.signal) stops the server; s.active
 stopped* = 4;       (* they have ended, and Serve is returning *)
+refused* = 5;       (* x's client refused by the Admitter (SetAdmit),
 ```
 
 A Logger's events
@@ -65,7 +68,13 @@ Answers x.request: Header once, then, after a 2x header only, the body. Called i
 Logger* = PROCEDURE (s: Server; event: INTEGER; x: Exchange; why-: ARRAY OF CHAR);
 ```
 
-Told what happens (served .. stopped), in the task it happens in: x for served and failed, NIL otherwise; why for failed and acceptFailed, "" otherwise. It should write a line of log without waiting between its parts, so the lines of tasks never mix.
+Told what happens (served .. stopped), in the task it happens in: x for served, failed and refused, NIL otherwise; why for failed and acceptFailed, "" otherwise. It should write a line of log without waiting between its parts, so the lines of tasks never mix.
+
+```oberon
+Admitter* = PROCEDURE (s: Server; peer-: Sockets.Address): BOOLEAN;
+```
+
+Whether the client at peer may be served: asked in the accept task, before the handshake, so it must not wait.
 
 ```oberon
 Writer* = POINTER TO WriterDesc;
@@ -164,6 +173,14 @@ PROCEDURE (s: Server) SetLog*(log: Logger);
 
 What the server tells of what happens, NIL for nothing (as at first).
 
+#### SetAdmit
+
+```oberon
+PROCEDURE (s: Server) SetAdmit*(admit: Admitter);
+```
+
+Who is served, NIL for every client (as at first); see Admitter.
+
 #### SetDeadline
 
 ```oberon
@@ -203,4 +220,4 @@ Closes the listeners, for a program that listens and then finds it can't serve, 
 PROCEDURE (s: Server) Serve*(count: LONGINT);
 ```
 
-Serves count connections (0: until a signal stops it), then waits for them to end, having closed the listeners. Call it from the program's main body: it runs every task. A signal caught since Listen stops it at once. Halts (133) unless listening.
+Serves count connections, refused ones included (0: until a signal stops it), then waits for them to end, having closed the listeners. Call it from the program's main body: it runs every task. A signal caught since Listen stops it at once. Halts (133) unless listening.

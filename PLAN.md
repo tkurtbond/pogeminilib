@@ -1386,6 +1386,30 @@ wait before `getaddrinfo`, in the lookup's thread) to make a lookup of
 
 If posockets renames or drops the hook, these tests fail to link.
 
+### Refusing clients by address [done]
+
+2026-11-19, for pogemini's `allow` and `deny` rules (its PLAN.md,
+"Address rules"): `Server.SetAdmit` takes an `Admitter`, `(s, peer):
+BOOLEAN`, which the accept task asks as soon as `SocketTasks.Accept`
+gives a connection, before a handler task or a handshake. A client it
+refuses is closed unread and logged as `refused` (event 5), with an
+`Exchange` that has only its peer, and counts toward `Serve`'s count
+like any other connection, but not toward the limit, since it never
+becomes active. The Admitter runs in the accept task, so it must not
+wait: a program resolving names for its rules does so in a task of its
+own and gives the Admitter addresses only. Checking before the
+handshake costs a refused client nothing of the server's: no TLS, no
+task. Closed before its ClientHello arrived, the client's handshake
+ends at EOF ("unexpected eof while reading"; TestServe), and with a
+ClientHello already queued the kernel would reset it, as good a
+refusal.
+
+`TestServe`'s `Admitter`, in process: a server on `""` port 0
+refusing IPv4 serves two connections; a client over `127.0.0.1` gets
+nothing, one over `::1` its 51, the Admitter is asked once for each
+with its address, and the log has `refused` for the first and `served`
+for the second, nothing else.
+
 ## Open questions
 
 - ~~**Should pogeminilib include the server engine**?~~ Yes (the user,

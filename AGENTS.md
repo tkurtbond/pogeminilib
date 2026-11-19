@@ -60,6 +60,10 @@ so `GeminiClient`'s lookups hold up no other task and both clients'
 deadlines count the lookup, with no change here but docs and tests
 (`ClientCases.Lookups`, `TestClient`'s `SlowLookup`, through posockets'
 test hook `Sockets.-set-resolve-delay`; PLAN.md, "Slow name lookups").
+Since 2026-11-19 a server may refuse clients by address before the
+handshake (`SetAdmit`, an `Admitter`; the `refused` event), for
+pogemini's `allow`/`deny` rules (`TestServe`'s `Admitter`; PLAN.md,
+"Refusing clients by address").
 
 ## Reference material
 

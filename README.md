@@ -506,7 +506,10 @@ END Hello.
 `examples/GeminiServe.Mod` adds a log, an input prompt, and checking
 that the host and port asked for are the server's own; given `-certs
 dir` instead of `-cert` and `-key`, it makes its certificate there
-through `Ensure`.
+through `Ensure`. A server may also refuse clients by their address
+(`SetAdmit`): its `Admitter` is asked as each connection is accepted,
+before the handshake, and a client it refuses is closed at once and
+logged as `refused`.
 
 ## Errors and halts
 
