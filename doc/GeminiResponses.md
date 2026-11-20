@@ -68,12 +68,10 @@ A request's options; InitOptions gives the defaults. deadline: ms for everything
 
 ```oberon
 Waiter* = POINTER TO WaiterDesc;
-WaiterDesc* = RECORD notEmpty: LONGINT END;
+WaiterDesc* = RECORD END;
 ```
 
 How a fetch waits: GeminiClient's through Tasks, GeminiFetch's in the kernel. An extension overrides both methods.
-
-The field is there only so that the record isn't empty: poc 0.14.0's collector, on 64-bit hosts, frees an object of a record with no fields while it is still reachable, since its data starts where its block ends, so a pointer to it marks the next block instead (PLAN.md, Phase 4).
 
 ```oberon
 Response* = POINTER TO ResponseDesc;

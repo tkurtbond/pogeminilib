@@ -103,15 +103,9 @@ TYPE
   END;
 
   (* How a fetch waits: GeminiClient's through Tasks, GeminiFetch's in
-     the kernel. An extension overrides both methods.
-
-     The field is there only so that the record isn't empty: poc
-     0.14.0's collector, on 64-bit hosts, frees an object of a record
-     with no fields while it is still reachable, since its data starts
-     where its block ends, so a pointer to it marks the next block
-     instead (PLAN.md, Phase 4). *)
+     the kernel. An extension overrides both methods. *)
   Waiter* = POINTER TO WaiterDesc;
-  WaiterDesc* = RECORD notEmpty: LONGINT END;
+  WaiterDesc* = RECORD END;
 
   (* A response. url is what was fetched; status and meta its header;
      version the TLS version agreed ("TLSv1.3"), for a program to warn

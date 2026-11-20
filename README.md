@@ -41,7 +41,7 @@ the BSDs), the client's and server's tests under valgrind on Linux, and
 
 ## Requirements
 
-- poc 0.14.0.
+- poc 0.15.0.
 - Installed in `~/.local/lib/poc` (or `POCLIBDIR=<dir>`), by the same
   poc: poDateTime, posockets, polibtls and pounix. `make deps` checks.
   polibtls needs libtls: LibreSSL's, or libretls on OpenSSL.

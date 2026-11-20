@@ -139,9 +139,9 @@ Known from the siblings, to keep in mind from the first test:
   the siblings' notes say: a program with tasks gets full memcheck,
   allowing for the two descriptors `Tasks` keeps open, which valgrind
   counts as errors (`test/vg-errors.sh`, `test/vg-fds.sh`).
-- **No record type with no fields, on the heap**: poc 0.14.0's
-  collector frees such an object while it is still reachable, on
-  64-bit hosts (PLAN.md, Phase 4). An abstract base gets a field.
+- **poc 0.15.0 or later**: 0.14.0's collector freed a still-reachable
+  object of a record type with no fields, on 64-bit hosts (PLAN.md,
+  Phase 4; poc's bug 28), and `WaiterDesc` is such a record again.
 
 ## Testing on the BSD hosts
 

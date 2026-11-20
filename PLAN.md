@@ -982,7 +982,9 @@ child; `test/make-certs.sh`, polibtls's, making the certificates into
   its block's header then reads free, and a method call on it
   segfaults); the bug is poc's (`GarbageCollectedHeap`,
   `FindBlock` and `BlockBytesFor`), recorded as bug 28 in
-  Peaseblossom's PLAN.md, "Ongoing bug fixing".
+  Peaseblossom's PLAN.md, "Ongoing bug fixing". Fixed in poc 0.15.0
+  (Peaseblossom `feabebc`); `notEmpty` was removed on 2026-11-20, and
+  pogeminilib needs 0.15.0 since.
 - **A fetch's stack**: one with an RSA client certificate and a CA
   file ran in a 24 KiB task stack on amd64 and not in 16 KiB, the TLS
   handshake being the most of it, so `GeminiClient.stackSize` is 64
